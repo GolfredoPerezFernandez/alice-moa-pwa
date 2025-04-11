@@ -303,7 +303,7 @@ const serverFetchLangChainResponse = server$(async function(userMessage: string,
     }
 });
 
-const serverProcessAudio = server$(async function(formData: FormData, language: string): Promise<string> {
+const serverProcessAudio = server$(async function(audioBase64: string, mimeType: string, language: string): Promise<string> {
     console.log("Server: Processing audio with OpenAI STT");
     const openAIApiKey = this.env.get('OPENAI_API_KEY');
     if (!openAIApiKey) {
@@ -312,12 +312,23 @@ const serverProcessAudio = server$(async function(formData: FormData, language: 
     }
 
     try {
-        // Add language hint to FormData before sending
+        // Convert base64 string back to binary data
+        const binaryData = Buffer.from(audioBase64, 'base64');
+        
+        // Create a new FormData on the server side
+        const formData = new FormData();
+        
+        // Create a Blob from the binary data
+        const blob = new Blob([binaryData], { type: mimeType });
+        
+        // Append the blob with a filename
+        formData.append("file", blob, "audio.webm");
         formData.append("prompt", `The following is a conversation in ${language}.`);
-        formData.append("model", "whisper-1"); // Specify model if needed
+        formData.append("model", "whisper-1");
         formData.append("response_format", "text");
 
-
+        console.log("Server: Sending audio data to OpenAI, size:", binaryData.length, "bytes");
+        
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
             method: "POST",
             headers: {
@@ -351,10 +362,33 @@ const serverSaveChatMessage = server$(async function(sessionId: string, userMess
     console.log("Server: Saving chat message for user:", userId);
     try {
         const client = tursoClient(this); // Pass full request event context
-        await client.execute({
-            sql: "INSERT INTO chat_history (sessionId, userId, userMessage, botResponse, timestamp) VALUES (?, ?, ?, ?, ?)",
-            args: [sessionId, userId, userMessage, botResponse, new Date().toISOString()]
+        
+        // Check if the chat_history table exists and has the expected columns
+        const tableInfo = await client.execute({
+            sql: "PRAGMA table_info(chat_history)"
         });
+        
+        // Log the table structure for debugging
+        console.log("Chat history table structure:", tableInfo.rows);
+        
+        // Check if session_id column exists (instead of sessionId)
+        const hasSessionIdColumn = tableInfo.rows.some((row: any) =>
+            row.name === 'sessionId' || row.name === 'session_id');
+        
+        if (hasSessionIdColumn) {
+            // Original query with sessionId
+            await client.execute({
+                sql: "INSERT INTO chat_history (sessionId, userId, userMessage, botResponse, timestamp) VALUES (?, ?, ?, ?, ?)",
+                args: [sessionId, userId, userMessage, botResponse, new Date().toISOString()]
+            });
+        } else {
+            // Alternative query without sessionId
+            await client.execute({
+                sql: "INSERT INTO chat_history (userId, userMessage, botResponse, timestamp) VALUES (?, ?, ?, ?)",
+                args: [userId, userMessage, botResponse, new Date().toISOString()]
+            });
+        }
+        
         console.log("Server: Chat message saved successfully");
     } catch (error: any) {
         console.error("Server: Error saving chat message to Turso:", error.message);
@@ -1221,6 +1255,42 @@ const onTrack$ = $((event: RTCTrackEvent) => {
     });
 
     // --- Audio Recording ---
+    
+    // Define processAudio$ first, before it's used in event listeners
+    const processAudio$ = $(async (audioBlob: Blob) => {
+        loading.value = true; // Indicate processing
+        try {
+            // Convert Blob to base64 string for easier serialization
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            const base64Audio = btoa(
+                new Uint8Array(arrayBuffer)
+                    .reduce((data, byte) => data + String.fromCharCode(byte), '')
+            );
+            
+            console.log("Client: Audio converted to base64, size:", base64Audio.length);
+            
+            // Send the base64 string to the server along with mime type
+            const transcription = await serverProcessAudio(
+                base64Audio,
+                audioBlob.type,  // Pass the mime type
+                languageMap[formValues.language] || 'English'
+            );
+
+            if (transcription && !transcription.startsWith("Error:")) {
+                // Add user message (transcription) and trigger AI response + talk
+                await startTalk$(transcription);
+            } else {
+                console.error("Transcription failed:", transcription);
+                chatHistory.push({ role: 'assistant', content: `Audio processing failed: ${transcription}` });
+            }
+        } catch (error: any) {
+            console.error("Client: Error processing audio:", error);
+            chatHistory.push({ role: 'assistant', content: `Error processing audio: ${error.message}` });
+        } finally {
+            loading.value = false;
+        }
+    });
+    
     const startRecording$ = $(async () => {
         if (isRecording.value) return;
 
@@ -1235,20 +1305,30 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                 audioChunks.push(event.data);
             });
 
-            mediaRecorder.addEventListener("stop", $(async () => { // Ensure $() for async operations within listener
+            mediaRecorder.addEventListener("stop", async () => {
                 const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-                stream.getTracks().forEach(track => track.stop()); // Stop stream tracks
+                
+                // Log video tracks to help with debugging
+                console.log("Found", stream.getVideoTracks().length, "active video tracks");
+                
+                // Stop all tracks
+                stream.getTracks().forEach(track => track.stop());
+                
+                // Update state
                 isRecording.value = false;
                 recorderRef.value = null;
+                
+                // Clear timer
                 if (timerIntervalRef.value) clearInterval(timerIntervalRef.value);
                 recordingTime.value = 0;
 
+                // Process audio if we have data
                 if (audioBlob.size > 0) {
                     await processAudio$(audioBlob);
                 } else {
                     console.log("Empty recording, skipping processing.");
                 }
-            }));
+            });
 
             mediaRecorder.start();
             isRecording.value = true;
@@ -1280,32 +1360,6 @@ const onTrack$ = $((event: RTCTrackEvent) => {
          if (timerIntervalRef.value) {
             clearInterval(timerIntervalRef.value);
             timerIntervalRef.value = null;
-        }
-    });
-
-     const processAudio$ = $(async (audioBlob: Blob) => {
-        loading.value = true; // Indicate processing
-        try {
-            const formData = new FormData();
-            formData.append("file", audioBlob, "recording.webm"); // Filename is important
-
-            const transcription = await serverProcessAudio(
-                formData,
-                languageMap[formValues.language] || 'English'
-            );
-
-            if (transcription && !transcription.startsWith("Error:")) {
-                // Add user message (transcription) and trigger AI response + talk
-                await startTalk$(transcription);
-            } else {
-                console.error("Transcription failed:", transcription);
-                chatHistory.push({ role: 'assistant', content: `Audio processing failed: ${transcription}` });
-            }
-        } catch (error: any) {
-            console.error("Client: Error processing audio:", error);
-             chatHistory.push({ role: 'assistant', content: `Error processing audio: ${error.message}` });
-        } finally {
-            loading.value = false;
         }
     });
 
