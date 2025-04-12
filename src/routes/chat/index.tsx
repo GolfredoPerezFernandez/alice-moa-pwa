@@ -2,14 +2,27 @@ import { component$, useSignal, useStore, useStylesScoped$, useVisibleTask$, $, 
 import { routeLoader$, server$, Form, routeAction$, zod$, z } from '@builder.io/qwik-city';
 import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
+// Import Lucide icons from @qwikest/icons
+import {
+  LuVolume2,
+  LuVolumeX,
+  LuMic,
+  LuMicOff,
+  LuSend,
+  LuAlertTriangle
+} from '@qwikest/icons/lucide';
 // Removed unused useAuthSession import
 import { tursoClient } from '~/utils/turso'; // Assuming turso client setup
 
 // --- Interfaces ---
 interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
+  timestamp?: string;
 }
+
+// Maximum number of messages to keep in context window
+const MAX_CONTEXT_MESSAGES = 10;
 
 interface FormValues {
   userResponse: string;
@@ -267,9 +280,30 @@ const serverCloseStream = server$(async function(streamId: string, sessionId: st
     }
 });
 
-const serverFetchLangChainResponse = server$(async function(userMessage: string, threadId: string, language: string) {
+// Function to trim messages to avoid exceeding context window limits
+const trimChatHistory = (messages: ChatMessage[], maxMessages: number = MAX_CONTEXT_MESSAGES): ChatMessage[] => {
+    if (messages.length <= maxMessages) return [...messages];
+    
+    // Find system messages (they should always be kept)
+    const systemMessages = messages.filter(msg => msg.role === 'system');
+    
+    // Get the most recent messages, excluding system messages
+    const nonSystemMessages = messages.filter(msg => msg.role !== 'system');
+    const recentMessages = nonSystemMessages.slice(-maxMessages);
+    
+    // Combine system messages with recent messages
+    return [...systemMessages, ...recentMessages];
+};
+
+const serverFetchLangChainResponse = server$(async function(
+    userMessage: string,
+    threadId: string,
+    language: string,
+    chatHistory: ChatMessage[] = []
+) {
     console.log("Server: Fetching LangChain response for thread:", threadId);
-    const openAIApiKey = this.env.get('OPENAI_API_KEY') || import.meta.env.OPENAI_API_KEY; // Use the environment variable you have
+    const openAIApiKey = this.env.get('OPENAI_API_KEY') || import.meta.env.OPENAI_API_KEY;
+    
     if (!openAIApiKey) {
         console.error("OpenAI API Key not configured on server.");
         return "Error: AI service not configured.";
@@ -283,16 +317,35 @@ const serverFetchLangChainResponse = server$(async function(userMessage: string,
         });
 
         const systemContent = `You are a helpful assistant for MOVE ON ACADEMY, a Language Academy. Answer all questions to the best of your ability in ${language}.`;
+        
+        // Add system message if not already present in history
+        const hasSystemMessage = chatHistory.some(msg => msg.role === 'system');
+        let processedHistory = [...chatHistory];
+        
+        if (!hasSystemMessage) {
+            processedHistory.unshift({
+                role: 'system',
+                content: systemContent
+            });
+        }
+        
+        // Add current user message
+        processedHistory.push({
+            role: 'user',
+            content: userMessage
+        });
+        
+        // Trim history to avoid token limit issues
+        const trimmedHistory = trimChatHistory(processedHistory);
+        
+        // Convert to LangChain message format
+        const messages = trimmedHistory.map(msg => {
+            if (msg.role === 'system') return new SystemMessage(msg.content);
+            if (msg.role === 'user') return new HumanMessage(msg.content);
+            return new AIMessage(msg.content);
+        });
 
-        // NOTE: LangGraph/Memory management is simplified here.
-        // For persistent memory, you'd need a server-side store (e.g., Redis, DB)
-        // associated with the threadId to load/save message history.
-        // This example just sends the current user message with the system prompt.
-        const messages = [
-            new SystemMessage(systemContent),
-            new HumanMessage(userMessage)
-        ];
-
+        console.log(`Server: Using ${messages.length} messages for context`);
         const response = await llm.invoke(messages);
         console.log("Server: LangChain response:", response.content);
         return response.content as string;
@@ -371,27 +424,54 @@ const serverSaveChatMessage = server$(async function(sessionId: string, userMess
         // Log the table structure for debugging
         console.log("Chat history table structure:", tableInfo.rows);
         
-        // Check if session_id column exists (instead of sessionId)
-        const hasSessionIdColumn = tableInfo.rows.some((row: any) =>
-            row.name === 'sessionId' || row.name === 'session_id');
+        // Get all column names for error handling
+        const columnNames = tableInfo.rows.map((row: any) => row.name);
+        console.log("Chat history columns:", columnNames.join(', '));
         
-        if (hasSessionIdColumn) {
-            // Original query with sessionId
-            await client.execute({
-                sql: "INSERT INTO chat_history (sessionId, userId, userMessage, botResponse, timestamp) VALUES (?, ?, ?, ?, ?)",
-                args: [sessionId, userId, userMessage, botResponse, new Date().toISOString()]
-            });
-        } else {
-            // Alternative query without sessionId
-            await client.execute({
-                sql: "INSERT INTO chat_history (userId, userMessage, botResponse, timestamp) VALUES (?, ?, ?, ?)",
-                args: [userId, userMessage, botResponse, new Date().toISOString()]
-            });
+        // Verify user_id column exists and handle potential naming issues
+        const userIdColumn = tableInfo.rows.find((row: any) =>
+            row.name === 'user_id' || row.name === 'userId');
+            
+        if (!userIdColumn) {
+            console.error("Server: chat_history table is missing the user_id/userId column!");
+            return;
         }
         
-        console.log("Server: Chat message saved successfully");
+        // Use the actual column name from the database
+        const userIdColumnName = userIdColumn.name;
+        console.log(`Server: Using column name "${userIdColumnName}" for user ID`);
+        
+        try {
+            // Dynamically build SQL with correct column name
+            const insertSQL = `INSERT INTO chat_history (${userIdColumnName}, role, content, timestamp) VALUES (?, ?, ?, ?)`;
+            
+            // Save user message
+            const userResult = await client.execute({
+                sql: insertSQL,
+                args: [userId, 'user', userMessage, new Date().toISOString()]
+            });
+            console.log("Server: User message saved successfully", userResult);
+            
+            // Save assistant message
+            const assistantResult = await client.execute({
+                sql: insertSQL,
+                args: [userId, 'assistant', botResponse, new Date().toISOString()]
+            });
+            console.log("Server: Assistant message saved successfully", assistantResult);
+        } catch (insertError: any) {
+            console.error("Server: SQL insert error:", insertError.message);
+            if (insertError.message.includes('no column named')) {
+                console.error("Server: Column name error - check that column names match exactly with the schema");
+                console.error("Server: Available columns:", columnNames.join(', '));
+                console.error("Server: Attempted to use column:", userIdColumnName);
+            }
+            throw insertError; // Re-throw to be caught by outer try/catch
+        }
+        
+        console.log("Server: Chat messages saved successfully");
     } catch (error: any) {
         console.error("Server: Error saving chat message to Turso:", error.message);
+        console.error("Server: Error details:", error);
     }
 });
 
@@ -403,17 +483,83 @@ const serverUpdateUserLang = server$(async function(userId: string | undefined, 
     console.log("Server: Updating language for user:", userId, "to", lang);
      try {
         const client = tursoClient(this); // Pass full request event context
-        // Assuming a 'users' table with 'id' and 'chatbotLang' columns
-        await client.execute({
-            sql: "UPDATE users SET chatbotLang = ? WHERE id = ?",
-            args: [lang, userId]
+        // Get table info to check the actual column names
+        const tableInfo = await client.execute({
+            sql: "PRAGMA table_info(users)"
         });
-        console.log("Server: User language updated successfully");
+        
+        // Log the table structure for debugging
+        console.log("Users table structure:", tableInfo.rows);
+        
+        // Try to find the chatbot language column (might be chatbotLang or chatbot_lang)
+        const langColumnInfo = tableInfo.rows.find((row: any) =>
+            row.name.toLowerCase().includes('chatbot') && row.name.toLowerCase().includes('lang'));
+        
+        if (langColumnInfo) {
+            const langColumnName = langColumnInfo.name;
+            console.log(`Found language column: ${langColumnName}`);
+            
+            await client.execute({
+                sql: `UPDATE users SET ${langColumnName} = ? WHERE id = ?`,
+                args: [lang, userId]
+            });
+            console.log("Server: User language updated successfully");
+        } else {
+            console.error("Server: Couldn't find chatbot language column in users table");
+        }
     } catch (error: any) {
         console.error("Server: Error updating user language in Turso:", error.message);
     }
 });
 
+
+// Constants for managing context window
+// Use the MAX_CONTEXT_MESSAGES constant defined earlier
+
+// Function to load chat history
+const serverLoadChatHistory = server$(async function(userId: string | undefined, limit: number = 50) {
+    if (!userId) {
+        console.warn("Server: Cannot load chat history, user not logged in.");
+        return [];
+    }
+    
+    console.log("Server: Loading chat history for user:", userId);
+    try {
+        const client = tursoClient(this);
+        
+        // Get most recent conversation thread for this user
+        // We'll load in ascending order to get chronological conversation
+        const result = await client.execute({
+            sql: "SELECT role, content, timestamp FROM chat_history WHERE user_id = ? ORDER BY timestamp ASC LIMIT ?",
+            args: [userId, limit * 2] // Double the limit to account for user/assistant pairs
+        });
+        
+        // Group messages by conversation pairs to ensure we have complete exchanges
+        const messages = result.rows.map((row: any) => ({
+            role: row.role,
+            content: row.content,
+            timestamp: row.timestamp
+        }));
+        
+        console.log(`Server: Loaded ${messages.length} chat history messages`);
+        
+        // If we have a lot of messages, trim to latest complete conversations
+        if (messages.length > MAX_CONTEXT_MESSAGES) {
+            // Keep the most recent complete conversations
+            const startIndex = Math.max(0, messages.length - MAX_CONTEXT_MESSAGES);
+            // Make sure we don't start in the middle of a conversation pair
+            const adjustedIndex = messages[startIndex].role === 'assistant' ? startIndex - 1 : startIndex;
+            const trimmedMessages = messages.slice(Math.max(0, adjustedIndex));
+            console.log(`Server: Trimmed history from ${messages.length} to ${trimmedMessages.length} messages`);
+            return trimmedMessages;
+        }
+        
+        return messages;
+    } catch (error: any) {
+        console.error("Server: Error loading chat history:", error.message);
+        return [];
+    }
+});
 
 // --- Route Loader ---
 export const useInitialData = routeLoader$(async (requestEv) => {
@@ -442,21 +588,44 @@ export const useInitialData = routeLoader$(async (requestEv) => {
         // At this point, userId is guaranteed to be a string (not undefined)
         // because we checked with if (!session?.user?.id) above
         const id = userId as string; // Explicitly cast to string for TypeScript
-        const result = await client.execute({
-            sql: "SELECT chatbotLang FROM users WHERE id = ? LIMIT 1",
-            args: [id]
+        
+        // Get table info to check actual column names
+        const tableInfo = await client.execute({
+            sql: "PRAGMA table_info(users)"
         });
-        if (result.rows.length > 0 && result.rows[0].chatbotLang) {
-            // Ensure the loaded language is valid
-            const validLang = languages.some(l => l.value === result.rows[0].chatbotLang);
-            if (validLang) {
-                userLanguage = result.rows[0].chatbotLang as string;
-            } else {
-                console.warn(`Loaded invalid language '${result.rows[0].chatbotLang}' for user ${userId}, using default.`);
+        
+        // Log the table structure for debugging
+        console.log("[CHAT] Users table structure:", tableInfo.rows);
+        
+        // Try to find the chatbot language column (might be chatbotLang or chatbot_lang)
+        const langColumnInfo = tableInfo.rows.find((row: any) =>
+            row.name.toLowerCase().includes('chatbot') && row.name.toLowerCase().includes('lang'));
+        
+        if (langColumnInfo) {
+            const langColumnName = langColumnInfo.name;
+            console.log(`[CHAT] Found language column: ${langColumnName}`);
+            
+            // Use a fixed alias in the query to avoid TypeScript dynamic property access issues
+            const result = await client.execute({
+                sql: `SELECT ${langColumnName} AS chatbot_language FROM users WHERE id = ? LIMIT 1`,
+                args: [id]
+            });
+            
+            if (result.rows.length > 0 && result.rows[0].chatbot_language) {
+                const langValue = result.rows[0].chatbot_language;
+                // Ensure the loaded language is valid
+                const validLang = languages.some(l => l.value === langValue);
+                if (validLang) {
+                    userLanguage = langValue as string;
+                } else {
+                    console.warn(`[CHAT] Loaded invalid language '${langValue}' for user ${userId}, using default.`);
+                }
             }
+        } else {
+            console.warn("[CHAT] Couldn't find chatbot language column in users table");
         }
     } catch (e: any) { // Catch block for the DB query try
-        console.error("Failed to load user language from DB:", e.message);
+        console.error("[CHAT] Failed to load user language from DB:", e.message);
     } // Closing brace for try block
 
     return {
@@ -486,9 +655,8 @@ export default component$(() => {
     const recordingTime = useSignal(0);
     const threadId = useSignal(initialData.value?.initialThreadId ?? crypto.randomUUID()); // Use optional chaining and default
 
-    const chatHistory = useStore<ChatMessage[]>([
-        { role: "assistant", content: "Welcome to the chatbot of MOA. Feel free to speak with Alice" },
-    ]);
+    const chatHistory = useStore<ChatMessage[]>([]);
+    const chatHistoryLoaded = useSignal(false);
     const formValues = useStore<FormValues>({
         userResponse: "",
         language: initialData.value?.initialLanguage ?? 'en-US', // Use optional chaining and default
@@ -1050,6 +1218,43 @@ const onTrack$ = $((event: RTCTrackEvent) => {
         });
     });
 
+    // Load chat history on component initialization
+    useVisibleTask$(async ({ cleanup }) => {
+        if (!initialData.value?.userId || chatHistoryLoaded.value) return;
+        
+        try {
+            console.log("Loading chat history for user:", initialData.value.userId);
+            const history = await serverLoadChatHistory(initialData.value.userId);
+            
+            // If we got messages, use them instead of default welcome message
+            if (history && history.length > 0) {
+                // Convert the loaded history to ChatMessage format
+                chatHistory.splice(0, chatHistory.length, ...history.map((msg: any) => ({
+                    role: msg.role,
+                    content: msg.content
+                })));
+                console.log(`Loaded ${history.length} chat messages from history`);
+            } else {
+                // Add default welcome message if no history
+                chatHistory.push({
+                    role: "assistant",
+                    content: "Welcome to the chatbot of MOA. Feel free to speak with Alice"
+                });
+            }
+        } catch (error) {
+            console.error("Error loading chat history:", error);
+            // Add default welcome message on error
+            if (chatHistory.length === 0) {
+                chatHistory.push({
+                    role: "assistant",
+                    content: "Welcome to the chatbot of MOA. Feel free to speak with Alice"
+                });
+            }
+        } finally {
+            chatHistoryLoaded.value = true;
+        }
+    });
+
     // Scroll chat to bottom on new message
     useVisibleTask$(({ track }) => {
         track(() => chatHistory.length);
@@ -1100,11 +1305,19 @@ const onTrack$ = $((event: RTCTrackEvent) => {
 
         try {
             // 1. Get LangChain Response
-            console.log("Client: Fetching LangChain response");
+            console.log("Client: Fetching LangChain response with chat history context");
+            
+            // Convert chat UI messages to format expected by LangChain
+            const historyForLangChain = chatHistory.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+            
             const botResponse = await serverFetchLangChainResponse(
                 userInput,
                 threadId.value,
-                languageMap[formValues.language] || 'English'
+                languageMap[formValues.language] || 'English',
+                historyForLangChain
             );
 
             // Add assistant message
@@ -1112,8 +1325,10 @@ const onTrack$ = $((event: RTCTrackEvent) => {
 
             // 2. Save to DB (fire and forget)
             // Use optional chaining for safety
-            serverSaveChatMessage(sessionId.value || 'no-session', userInput, botResponse, initialData.value?.userId)
-                .catch(err => console.error("Client: Failed to save chat message:", err));
+            if (initialData.value?.userId) {
+                serverSaveChatMessage(sessionId.value || 'no-session', userInput, botResponse, initialData.value.userId)
+                    .catch(err => console.error("Client: Failed to save chat message:", err));
+            }
 
 
             // 3. Create D-ID Talk (if not muted and connected)
@@ -1373,178 +1588,172 @@ const onTrack$ = $((event: RTCTrackEvent) => {
 
 
     // --- Render ---
+    useVisibleTask$(() => {
+        // Ajuste dinámico del layout con cálculo preciso para evitar scroll
+        const adjustLayout = () => {
+            const vh = window.innerHeight;
+            const vw = window.innerWidth;
+            
+            // Cálculo más preciso para prevenir scroll
+            const navbarHeight = 58;
+            // Margen de seguridad adicional para evitar scrollbar
+            const safetyMargin = 10;
+            // Footer/input height más el padding/margin
+            const bottomHeight = 5;
+            
+            // Altura disponible real con todos los márgenes necesarios
+            const availableHeight = vh - navbarHeight - safetyMargin - bottomHeight;
+            
+            // Ajuste proporciones para que encaje perfectamente sin scroll
+            const videoHeight = Math.floor(availableHeight * 0.38);
+            const chatHeight = availableHeight - videoHeight;
+            
+            // Variables CSS para el layout completo
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+            document.documentElement.style.setProperty('--vw', `${vw}px`);
+            document.documentElement.style.setProperty('--available-height', `${availableHeight}px`);
+            document.documentElement.style.setProperty('--video-height', `${videoHeight}px`);
+            document.documentElement.style.setProperty('--chat-height', `${chatHeight}px`);
+            
+            // Ajustes de tamaño para elementos UI basados en el ancho
+            const inputHeight = Math.max(32, Math.min(40, Math.floor(vw * 0.03)));
+            document.documentElement.style.setProperty('--input-height', `${inputHeight}px`);
+        };
+        
+        // Ejecutar al cargar y cuando cambie el tamaño
+        adjustLayout();
+        window.addEventListener('resize', adjustLayout);
+        return () => window.removeEventListener('resize', adjustLayout);
+    });
+    
     return (
-        <div class="flex flex-col h-screen w-full relative bg-gray-100 overflow-hidden">
-            {/* Header Placeholder - Adapt from layout.tsx if needed */}
-            {/* <header class="bg-white shadow-md p-4 text-xl font-bold">MOA Chatbot</header> */}
+        <div class="chat-container" style={{ height: 'var(--available-height, 70vh)' }}>
 
-            <div class="flex flex-row flex-grow items-start w-full p-4 gap-4 overflow-hidden">
-
-                {/* Left Panel: Video & Controls */}
-                <div class="w-2/5 flex flex-col h-full space-y-4">
-                    {/* Video Area */}
-                    <div class="relative w-full aspect-video rounded-lg overflow-hidden shadow-lg bg-black border-4 border-white flex-shrink-0">
-                        <video
-                            ref={videoRef}
-                            id="talk-video"
-                            autoplay
-                            playsInline
-                            muted={muteVideo.value}
-                            class="w-full h-full object-cover"
-                            preload="auto"
-                        />
-                        {loading.value && (
-                            <div class="absolute bottom-2 right-2 bg-black bg-opacity-60 text-white px-3 py-1 rounded-full text-xs flex items-center gap-1">
-                                <Spinner />
-                                <span>Processing...</span>
-                            </div>
-                        )}
-                         {initiating.value && (
-                            <div class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 text-white">
-                                <Spinner />
-                                <p class="mt-2 text-sm font-medium">Connecting to Avatar...</p>
-                            </div>
-                        )}
+            {/* Video Panel - Similar a la imagen de referencia */}
+            <div class="video-panel">
+                <video
+                    ref={videoRef}
+                    id="talk-video"
+                    autoplay
+                    playsInline
+                    muted={muteVideo.value}
+                    class="video-element"
+                    preload="auto"
+                />
+                
+                {loading.value && (
+                    <div class="video-processing-indicator">
+                        <Spinner />
+                        <span>Processing...</span>
                     </div>
-
-                    {/* Controls Area */}
-                    <div class="flex flex-col space-y-4 p-4 bg-white rounded-lg shadow">
-                         {/* Mute & Language */}
-                        <div class="flex items-center space-x-3">
+                )}
+                
+                {initiating.value && (
+                    <div class="video-connecting-overlay">
+                        <Spinner />
+                        <p>Connecting to Avatar...</p>
+                    </div>
+                )}
+                
+                {/* Control Panel - Minimalista como en la imagen */}
+                <div class="control-panel">
+                    <div class="control-left">
+                        {/* Controls moved to chat input area */}
+                    </div>
+                    
+                    <div class="control-right">
+                        {!connected.value && !initiating.value && (
                             <button
-                                onClick$={toggleMuteVideo$}
-                                class={`w-11 h-11 flex justify-center items-center rounded-full text-white shadow transition-colors ${muteVideo.value ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'}`}
-                                aria-label={muteVideo.value ? 'Unmute Video' : 'Mute Video'}
-                            >
-                                {muteVideo.value ? <VolumeMuteIcon /> : <VolumeUpIcon />}
+                                onClick$={handleReconnectClick$}
+                                class="connect-button">
+                                Connect
                             </button>
-                            <select
-                                name="language"
-                                value={formValues.language}
-                                onChange$={handleLanguageChange$}
-                                class="flex-grow p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                                {languages.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Connection Status & Button */}
-                        <div class="text-center pt-2">
-                            {!connected.value && !initiating.value && (
-                                <button
-                                    onClick$={handleReconnectClick$} // Use reconnect handler
-                                    class="px-6 py-3 bg-green-500 text-white rounded-full font-semibold shadow hover:bg-green-600 transition duration-200"
-                                >
-                                    Connect Avatar
-                                </button>
-                            )}
-                            {connected.value && (
-                                <div class="inline-flex items-center gap-2 px-4 py-2 bg-green-100 text-green-700 rounded-full font-medium text-sm shadow-sm">
-                                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                                    Connected
-                                </div>
-                            )}
-                             {connectionError.value && (
-                                <div class="mt-3 p-3 bg-red-100 text-red-700 rounded-md text-sm shadow-sm flex items-center gap-2">
-                                   <AlertTriangleIcon />
-                                    <span>{connectionError.value}</span>
-                                </div>
-                            )}
-                        </div>
+                        )}
                     </div>
                 </div>
+            </div>
 
-                {/* Right Panel: Chat */}
-                <div class="flex-grow h-full flex flex-col bg-white rounded-lg shadow-lg overflow-hidden">
-                    {/* Message List */}
-                    <div
-                        ref={chatMessagesRef}
-                        class="flex-grow overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-white to-gray-50" // Simple gradient background
-                    >
-                        {chatHistory.map((message, index) => (
-                            <div
-                                key={index}
-                                class={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                            >
-                                <div
-                                    class={`max-w-[80%] p-3 rounded-xl shadow-sm animate-bubble-appear ${
-                                        message.role === 'user'
-                                            ? 'bg-blue-500 text-white rounded-br-none'
-                                            : 'bg-gray-200 text-gray-800 rounded-bl-none'
-                                    }`}
-                                    style={{ animationDelay: `${index * 0.05}s` }}
-                                >
-                                     <div class="text-xs mb-1 opacity-80 font-medium">
-                                        {message.role === 'user' ? 'You' : 'Assistant'}
-                                    </div>
-                                    <p class="text-sm whitespace-pre-wrap">{message.content}</p>
+            {/* Chat Panel - Limpio y elegante como en la imagen */}
+            <div class="chat-panel">
+                {/* Header similar a la imagen */}
+                <div class="chat-header">
+                    <div class="chat-header-info">
+                        <div class="chat-title">Assistant</div>
+                        <div class="chat-subtitle">Welcome to the chatbot of MOA. Feel free to speak with Alice</div>
+                    </div>
+                </div>
+                
+                {/* Mensajes de Chat */}
+                <div
+                    ref={chatMessagesRef}
+                    class="chat-messages">
+                    {chatHistory.map((message, index) => (
+                        <div
+                            key={index}
+                            class={`message-container ${message.role === 'user' ? 'user-message' : 'assistant-message'}`}>
+                            <div class={`message-bubble ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}`}>
+                                <div class="message-sender">
+                                    {message.role === 'user' ? 'You' : 'Assistant'}
                                 </div>
+                                <p class="message-content">{message.content}</p>
                             </div>
-                        ))}
-                         {loading.value && chatHistory[chatHistory.length - 1]?.role === 'user' && (
-                             <div class="flex justify-start">
-                                <div class="max-w-[80%] p-3 rounded-xl shadow-sm bg-gray-200 text-gray-800 rounded-bl-none">
-                                    <div class="text-xs mb-1 opacity-80 font-medium">Assistant</div>
-                                    <div class="typing-indicator"><span></span><span></span><span></span></div>
-                                </div>
+                        </div>
+                    ))}
+                    
+                    {loading.value && chatHistory[chatHistory.length - 1]?.role === 'user' && (
+                        <div class="message-container assistant-message">
+                            <div class="message-bubble assistant-bubble">
+                                <div class="message-sender">Assistant</div>
+                                <div class="typing-indicator"><span></span><span></span><span></span></div>
                             </div>
-                         )}
+                        </div>
+                    )}
                     </div>
 
-                    {/* Input Area */}
-                    <div class="flex items-center p-4 border-t border-gray-200 bg-gray-50 relative">
-                        {/* Mic Button */}
-                         <div class="relative mr-3">
-                            <button
-                                onClick$={toggleRecording$}
-                                disabled={initiating.value || loading.value}
-                                class={`w-11 h-11 flex justify-center items-center rounded-full border transition-colors duration-200 shadow-sm ${
-                                    isRecording.value
-                                        ? 'bg-red-500 text-white border-red-600 animate-pulse'
-                                        : 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300'
-                                } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                aria-label={isRecording.value ? 'Stop Recording' : 'Start Recording'}
-                            >
-                                {isRecording.value ? <MicIcon /> : <MicOffIcon />}
-                            </button>
-                             {isRecording.value && (
-                                <div class="absolute -top-7 -left-6 bg-red-500 text-white px-2 py-0.5 rounded-full text-xs font-bold shadow animate-fade-in">
-                                    {formatRecordingTime(recordingTime.value)}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Text Input */}
+                {/* Input Area - Fixed at bottom on mobile */}
+                <div class="chat-input-container fixed-mobile-input">
+                    <div class="chat-input-wrapper">
+                        <button
+                            onClick$={toggleMuteVideo$}
+                            class="volume-button control-btn"
+                            aria-label={muteVideo.value ? 'Unmute Video' : 'Mute Video'}>
+                            {muteVideo.value ? <LuVolumeX class="w-4 h-4" /> : <LuVolume2 class="w-4 h-4" />}
+                        </button>
+                        
+                        <select
+                            name="language"
+                            value={formValues.language}
+                            onChange$={handleLanguageChange$}
+                            class="language-selector">
+                            {languages.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    {option.label}
+                                </option>
+                            ))}
+                        </select>
+                        
+                        <button
+                            onClick$={toggleRecording$}
+                            disabled={initiating.value || loading.value}
+                            class={`mic-button ${isRecording.value ? 'recording' : ''}`}
+                            aria-label={isRecording.value ? 'Stop Recording' : 'Start Recording'}>
+                            {isRecording.value ? <LuMic class="w-4 h-4" /> : <LuMicOff class="w-4 h-4" />}
+                        </button>
+                        
                         <input
                             ref={inputRef}
                             onKeyUp$={handleKeyUp$}
                             type="text"
                             placeholder={initiating.value ? "Connecting..." : "Type a message..."}
                             disabled={initiating.value || loading.value}
-                            class="flex-grow px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:bg-gray-100"
+                            class="chat-input"
                         />
-
-                        {/* Send Button */}
+                        
                         <button
                             onClick$={handleSendClick$}
-                            disabled={initiating.value || loading.value} // Only disable when loading or initiating
-                            class="ml-3 px-5 py-2 bg-blue-500 text-white rounded-full font-semibold shadow hover:bg-blue-600 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-[110px]" // Fixed width for consistency
-                        >
-                            {loading.value ? (
-                                <>
-                                    <Spinner size="small" />
-                                    <span class="ml-1.5">Sending...</span>
-                                </>
-                            ) : (
-                                <>
-                                    <SendIcon />
-                                    <span class="ml-1.5">Send</span>
-                                </>
-                            )}
+                            disabled={initiating.value || loading.value}
+                            class="send-button">
+                            {loading.value ? <Spinner size="small" /> : <LuSend class="w-4 h-4" />}
                         </button>
                     </div>
                 </div>
@@ -1553,13 +1762,7 @@ const onTrack$ = $((event: RTCTrackEvent) => {
     );
 });
 
-// --- Placeholder Icons (Replace with SVGs or library like lucide-qwik) ---
-export const VolumeUpIcon = component$(() => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>);
-export const VolumeMuteIcon = component$(() => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>);
-export const MicIcon = component$(() => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>);
-export const MicOffIcon = component$(() => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>);
-export const SendIcon = component$(() => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>);
-export const AlertTriangleIcon = component$(() => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>);
+// Spinner component kept as is, since it's a custom animated component
 export const Spinner = component$<{ size?: 'small' | 'medium' }>(({ size = 'medium' }) => {
     const sizeClass = size === 'small' ? 'w-4 h-4 border-2' : 'w-5 h-5 border-[3px]';
     return <div class={`animate-spin rounded-full ${sizeClass} border-white border-t-transparent`} role="status" aria-label="loading"></div>;
@@ -1617,8 +1820,418 @@ export const STYLES = `
 }
 
 /* Custom scrollbar (optional) */
-.overflow-y-auto::-webkit-scrollbar {
+/* Ensure the app takes exactly the viewport size */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+                </div>
+            </div>
+        </div>
+    );
+});
+
+/* Estilos CSS para el nuevo diseño limpio y minimalista */
+/* Base Styles */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Main Container */
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background-color: #f8f9fa;
+  overflow: hidden;
+}
+
+/* Video Panel */
+.video-panel {
+  width: 100%;
+  position: relative;
+  height: var(--video-height, 40vh);
+  background-color: #000;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.video-element {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.control-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.control-left, .control-right {
+  display: flex;
+  align-items: center;
+}
+
+.volume-button {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 50%;
+  background-color: #eaeaea;
+  border: none;
+  margin-right: 10px;
+  cursor: pointer;
+}
+
+.language-selector {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  background-color: white;
+  font-size: 14px;
+}
+
+.connect-button {
+  padding: 6px 16px;
+  background-color: #0cd15b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* Chat Panel */
+.chat-panel {
+  flex-grow: 1;
+  height: var(--chat-height, 50vh);
+  background-color: white;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-header {
+  padding: 12px 16px;
+  background-color: #f1f1f4;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.chat-header-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-title {
+  font-weight: 500;
+  color: #333;
+  font-size: 15px;
+}
+
+.chat-subtitle {
+  font-size: 12px;
+  color: #666;
+  margin-top: 3px;
+}
+
+.chat-messages {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.message-container {
+  display: flex;
+}
+
+.user-message {
+  justify-content: flex-end;
+}
+
+.assistant-message {
+  justify-content: flex-start;
+}
+
+.message-bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  animation: bubble-appear 0.2s ease-out;
+}
+
+.user-bubble {
+  background-color: #1a85ff;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.assistant-bubble {
+  background-color: #f1f1f4;
+  color: #333;
+  border-bottom-left-radius: 4px;
+}
+
+.message-sender {
+  font-size: 11px;
+  margin-bottom: 4px;
+  opacity: 0.8;
+  font-weight: 500;
+}
+
+.message-content {
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Input Area */
+.chat-input-container {
+  padding: 12px 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Fixed Mobile Input */
+.fixed-mobile-input {
+  position: relative;
+}
+
+/* Fixed position for mobile */
+@media (max-width: 767px) {
+  .fixed-mobile-input {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: #f8f9fa;
+    padding: 10px 16px;
+    z-index: 20;
+    border-top: 1px solid #e0e0e0;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  }
+  
+  /* Add padding at the bottom of chat messages to prevent overlap with fixed input */
+  .chat-messages {
+    padding-bottom: 70px !important;
+  }
+}
+
+.chat-input-wrapper {
+  display: flex;
+  align-items: center;
+  background-color: white;
+  border-radius: 24px;
+  border: 1px solid #e0e0e0;
+  padding: 0 6px;
+  height: 42px;
+}
+
+.control-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+}
+
+.mic-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+}
+
+.language-selector {
+  height: 28px;
+  border: none;
+  background: #f0f0f0;
+  border-radius: 14px;
+  padding: 0 8px;
+  margin: 0 4px;
+  font-size: 12px;
+  color: #333;
+}
+
+.mic-button.recording {
+  color: #f44336;
+  animation: pulse 1.5s infinite;
+}
+
+.chat-input {
+  flex-grow: 1;
+  height: 100%;
+  border: none;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.chat-input:focus {
+  outline: none;
+}
+
+.send-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #1a85ff;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* Loading and Status Indicators */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.typing-indicator span {
   width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #888;
+  animation: typing 1.4s infinite both;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.video-processing-indicator {
+  position: absolute;
+  right: 10px;
+  bottom: 60px;
+  background-color: rgba(0,0,0,0.7);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.video-connecting-overlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0,0,0,0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  gap: 10px;
+}
+
+/* Animations */
+@keyframes bubble-appear {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+@keyframes typing {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+  100% { transform: translateY(0); }
+}
+/* Responsive Adjustments */
+@media (min-width: 768px) {
+  .chat-container {
+    flex-direction: row;
+  }
+  
+  .video-panel {
+    width: 40%;
+    height: var(--available-height, 90vh);
+  }
+  
+  .chat-panel {
+    width: 60%;
+    height: var(--available-height, 100vh);
+  }
+  
+  .control-panel {
+    height: 40px;
+  }
+  
+  .chat-input-wrapper {
+    max-width: 90%;
+    margin: 0 auto;
+  }
+  
+  /* Reset fixed position for desktop */
+  .fixed-mobile-input {
+    position: relative;
+    box-shadow: none;
+  }
+}
+}
+
+/* Hide scrollbars but maintain functionality */
+.chat-messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.1);
+  border-radius: 10px;
+}
+  overflow: hidden;
+}
+
+/* Hide scrollbars on main layout */
+.h-screen.w-screen.max-w-full {
+  overflow: hidden;
+}
+
+.overflow-y-auto::-webkit-scrollbar {
+  width: 3px;
 }
 .overflow-y-auto::-webkit-scrollbar-track {
   background: rgba(0,0,0,0.05);
@@ -1630,6 +2243,13 @@ export const STYLES = `
 }
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
   background: rgba(0,0,0,0.3);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .overflow-y-auto::-webkit-scrollbar {
+    width: 3px;
+  }
 }
 `;
 

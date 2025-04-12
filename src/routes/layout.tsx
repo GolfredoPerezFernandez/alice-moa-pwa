@@ -332,32 +332,34 @@ export default component$(() => {
         <Slot />
       </main>
 
-      {/* Footer */}
-      <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-6 mt-auto">
-        <div class="container mx-auto px-4">
-          <div class="flex flex-col md:flex-row justify-between items-center">
-            <div class="flex items-center mb-4 md:mb-0">
-              {/* Updated Footer Logo */}
-              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-500 to-green-500 flex items-center justify-center text-white shadow">
-                 <LuGraduationCap class="w-5 h-5" />
+      {/* Footer - Not displayed on chat page */}
+      {!location.url.pathname.startsWith('/chat') && (
+        <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-6 mt-auto">
+          <div class="container mx-auto px-4">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+              <div class="flex items-center mb-4 md:mb-0">
+                {/* Updated Footer Logo */}
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-500 to-green-500 flex items-center justify-center text-white shadow">
+                   <LuGraduationCap class="w-5 h-5" />
+                </div>
+                {/* Updated Footer Brand Name */}
+                <span class="ml-2 text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
+                  Move On Academy
+                </span>
               </div>
-              {/* Updated Footer Brand Name */}
-              <span class="ml-2 text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
-                Move On Academy
-              </span>
-            </div>
-            <div class="text-center md:text-right text-sm text-gray-600 dark:text-gray-400">
-              <p>© {new Date().getFullYear()} Move On Academy. All rights reserved.</p>
-              <div class="mt-2 space-x-4">
-                {/* Updated Footer Link Colors */}
-                <Link href="/terms" class="hover:text-teal-600 dark:hover:text-teal-400">Terms</Link>
-                <Link href="/privacy" class="hover:text-teal-600 dark:hover:text-teal-400">Privacy</Link>
-                <Link href="/contact" class="hover:text-teal-600 dark:hover:text-teal-400">Contact</Link>
+              <div class="text-center md:text-right text-sm text-gray-600 dark:text-gray-400">
+                <p>© {new Date().getFullYear()} Move On Academy. All rights reserved.</p>
+                <div class="mt-2 space-x-4">
+                  {/* Updated Footer Link Colors */}
+                  <Link href="/terms" class="hover:text-teal-600 dark:hover:text-teal-400">Terms</Link>
+                  <Link href="/privacy" class="hover:text-teal-600 dark:hover:text-teal-400">Privacy</Link>
+                  <Link href="/contact" class="hover:text-teal-600 dark:hover:text-teal-400">Contact</Link>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
 
       {/* Custom animations and styles */}
       <style>{`
