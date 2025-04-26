@@ -57,35 +57,31 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
   const {
     email,
     password,
-    fullName // Changed from studentName
-    // Removed schoolId, gradeId
+    fullName,
+    userType: selectedUserType
   } = data as {
     email: string;
     password: string;
-    fullName?: string; // Added fullName for general user registration
+    fullName?: string;
+    userType?: string;
   };
 
   try {
     const passwordHash = await hashPassword(password);
-    // First registration is admin, others are normal users
+    // First registration is admin, others are based on selection or default to normal
     const firstUserCheck = await client.execute({
       sql: 'SELECT COUNT(*) as count FROM users',
       args: []
     });
     
     const isFirstUser = firstUserCheck.rows.length > 0 && firstUserCheck.rows[0].count === 0;
-    // Assign userType here, inside the try block after checking isFirstUser
     // Declare variables at the start of the try block
     let userId: number | bigint | undefined;
-    let userType: 'admin' | 'normal';
+    let userType: 'admin' | 'coordinator' | 'normal';
 
-    userType = isFirstUser ? 'admin' : 'normal'; // Assign userType here
+    // First user is admin, otherwise use selected type or default to normal
+    userType = isFirstUser ? 'admin' : 'normal';
     
-    // Use executeQuery directly for transaction operations to handle them properly
-    // We'll store user ID from the result
-    // Removed duplicate declarations
-    
-    // First create the user without a transaction for the first part
     // Insert user with name if provided
     const sql = fullName
       ? 'INSERT INTO users (email, password_hash, type, name) VALUES (?, ?, ?, ?)'
@@ -93,28 +89,53 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
     const args = fullName ? [email, passwordHash, userType, fullName.trim()] : [email, passwordHash, userType];
     
     const result = await client.execute({ sql, args });
-    // Removed extra closing parenthesis
-
-    // Convert the ID to string safely
-    userId = result.lastInsertRowid; // Assign userId after client.execute
+    userId = result.lastInsertRowid;
+    
     if (!userId) {
       throw new Error("Registration failed: userId is undefined");
     }
     
-    // Removed student record creation logic
+    // Create basic contract details to store user type (sector)
+    if (selectedUserType === 'trabajador' || selectedUserType === 'despacho' || selectedUserType === 'sindicato') {
+      // Set sector based on user type
+      const sector = selectedUserType === 'trabajador' ? 'trabajador' :
+                    selectedUserType === 'despacho' ? 'despacho' :
+                    'sindicato';
+      
+      try {
+        // Insert minimal contract details with the sector information
+        await client.execute({
+          sql: `INSERT INTO contract_details
+                (user_id, community, province, profession, contract_start_date,
+                contract_type, probation_period, work_schedule_type, sector)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            userId,
+            'Default', // community
+            'Default', // province
+            'Default', // profession
+            new Date().toISOString().split('T')[0], // contract_start_date
+            'Default', // contract_type
+            'No', // probation_period
+            'Completa', // work_schedule_type
+            sector // Store the user type in the sector field
+          ]
+        });
+      } catch (error) {
+        console.error("Error creating contract details:", error);
+        // Continue registration even if contract details fail
+      }
+    }
     
     // Use the utility function to set cookies
-    // Ensure userId is treated as string/number compatible with setCookies if needed
     const userIdString = String(userId);
-    setCookies(requestEvent, userIdString, userType); // Use userIdString
+    setCookies(requestEvent, userIdString, userType);
 
-    // Redirect logic - Admin might go to an admin panel, others to marketplace or profile
-    // Redirect logic - Admin might go to an admin panel, others to marketplace or profile
+    // Redirect logic
     if (userType === 'admin') {
-      // TODO: Create an admin route if needed, for now redirect to home
       requestEvent.redirect(302, '/');
     } else {
-      requestEvent.redirect(302, '/chat'); // Redirect normal users to the chat
+      requestEvent.redirect(302, '/chat');
     }
     return { success: true };
   } catch (error) { // Correct catch block for useRegister
@@ -150,27 +171,23 @@ export const useLogin = routeAction$(async (data, requestEvent) => {
     // Convert user.id to string to avoid type issues
     const userIdString = String(user.id);
     
+    // Update session_expires to 24 hours to match cookie duration
     await client.execute({
       sql: 'UPDATE users SET session_expires = ? WHERE id = ?',
-      args: [new Date(Date.now() + 60 * 60 * 1000), userIdString]
+      args: [new Date(Date.now() + 24 * 60 * 60 * 1000), userIdString]
     });
 
-    // Get user type with proper type casting
-    const userType = (user.type === 'admin')
-      ? 'admin'
-      : (user.type === 'coordinator')
-        ? 'coordinator'
-        : 'normal';
+    // Get user type from the database
+    const userType = (user.type === 'admin' ? 'admin' :
+                      user.type === 'coordinator' ? 'coordinator' : 'normal') as 'admin' | 'coordinator' | 'normal';
     
     // Use the utility function to set cookies
     setCookies(requestEvent, userIdString, userType);
     
     // Redirect after login - Admin to home (or future admin panel), others to marketplace
-    if (userType === 'admin') {
-       requestEvent.redirect(302, '/'); // Or '/admin' if created
-    } else {
+  
        requestEvent.redirect(302, '/chat'); // Redirect normal users to the chat
-    }
+  
     return { success: true };
   } catch (error) {
     console.error('Login error:', error);
@@ -255,16 +272,11 @@ export default component$(() => {
       {/* Example: Add small theme-colored dots */}
       <div class="fixed inset-0 pointer-events-none overflow-hidden z-0">
         {/* Keep pulsing dots, update colors */}
-        <div class="w-3 h-3 bg-teal-400/50 dark:bg-teal-300/40 rounded-full absolute top-[20%] left-[35%] animate-[pulse_4s_infinite]"></div>
-        <div class="w-2 h-2 bg-green-400/50 dark:bg-green-300/40 rounded-full absolute top-[60%] left-[70%] animate-[pulse_5s_infinite]" style="animation-delay: 0.7s;"></div>
+        <div class="w-3 h-3 bg-red-400/50 dark:bg-red-300/40 rounded-full absolute top-[20%] left-[35%] animate-[pulse_4s_infinite]"></div>
+        <div class="w-2 h-2 bg-red-400/50 dark:bg-red-300/40 rounded-full absolute top-[60%] left-[70%] animate-[pulse_5s_infinite]" style="animation-delay: 0.7s;"></div>
         {/* Removed redundant floating shapes defined in layout */}
         
-        {/* Show setup message if any */}
-        {setupMessage.value && (
-          <div class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-blue-50 border border-blue-200 text-blue-800 rounded-md px-4 py-2 text-sm max-w-xs text-center z-50">
-            {setupMessage.value}
-          </div>
-        )}
+    
       </div>
       {/* End of decorative elements */}
 
@@ -273,17 +285,17 @@ export default component$(() => {
         <div class="flex items-center">
           <div class="relative">
             {/* Updated Logo Icon - Teal/Green */}
-            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-teal-500 to-green-500 flex items-center justify-center text-white shadow-lg">
-               {/* Using LuGraduationCap consistent with layout */}
-               <LuGraduationCap class="w-6 h-6" />
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-white shadow-lg">
+               {/* Icon for DAI Off */}
+               <LuUser class="w-6 h-6" />
             </div>
           </div>
           <div class="ml-2 flex flex-col">
             {/* Updated App Name and Tagline - Teal/Green */}
-            <h1 class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
-              Move On Academy
+            <h1 class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-500 dark:from-red-400 dark:to-red-300">
+              DAI Off
             </h1>
-            <span class="text-xs text-teal-700 dark:text-teal-400">Language Learning Platform</span>
+            <span class="text-xs text-red-700 dark:text-red-400">Tu Defensor Laboral Digital</span>
           </div>
         </div>
       </div>
@@ -293,10 +305,10 @@ export default component$(() => {
         <div class="bg-white dark:bg-gray-800/80 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden backdrop-blur-sm p-8 animate-[fade-in_0.5s_ease-out]">
           <div class="text-center mb-8">
             {/* Updated Header Gradient - Teal/Green */}
-            <h2 class="text-3xl font-bold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
-              {step.value === 'email' ? 'Welcome Back!' :
-              step.value === 'password' ? 'Sign In' :
-              'Join Move On Academy'}
+            <h2 class="text-3xl font-bold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-500 dark:from-red-400 dark:to-red-300">
+              {step.value === 'email' ? 'Bienvenido de vuelta!' :
+              step.value === 'password' ? 'Iniciar Sesión' :
+              'Únete a DAI Off'}
             </h2>
             <p class="text-gray-600 dark:text-gray-300">
               {step.value === 'email' ? 'Enter your email to continue' :
@@ -335,7 +347,7 @@ export default component$(() => {
                     name="email" 
                     type="email" 
                     required 
-                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
+                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-red-600 dark:focus:ring-red-500 bg-white dark:bg-gray-700"
                     placeholder="you@example.com"
                   />
                 </div>
@@ -352,7 +364,7 @@ export default component$(() => {
                   isLoading.value = true;
                   errorMessage.value = '';
                 }}
-                class="w-full flex justify-center items-center py-3 px-4 rounded-lg text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed" // Updated button gradient
+                class="w-full flex justify-center items-center py-3 px-4 rounded-lg text-white bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {isLoading.value ? (
                   <span class="flex items-center">
@@ -394,13 +406,13 @@ export default component$(() => {
                     name="password" 
                     type="password" 
                     required
-                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
+                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-red-600 dark:focus:ring-red-500 bg-white dark:bg-gray-700"
                     placeholder="••••••••"
                   />
                 </div>
                 <div class="flex justify-end">
                   {/* TODO: Implement password reset - Updated link color */}
-                  <a href="#" class="text-sm text-teal-600 hover:text-teal-500 dark:text-teal-400 dark:hover:text-teal-300">
+                  <a href="#" class="text-sm text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300">
                     Forgot password?
                   </a>
                 </div>
@@ -427,7 +439,7 @@ export default component$(() => {
                     isLoading.value = true;
                     errorMessage.value = '';
                   }}
-                  class="flex justify-center items-center py-2 px-6 rounded-lg text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed" // Updated button gradient
+                  class="flex justify-center items-center py-2 px-6 rounded-lg text-white bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {isLoading.value ? (
                     <span class="flex items-center">
@@ -444,8 +456,8 @@ export default component$(() => {
 
           {/* Register Step */}
           {step.value === 'register' && (
-            <Form 
-              action={registerAction} 
+            <Form
+              action={registerAction}
               class="space-y-6"
               onSubmit$={() => {
                 // Loading state is now set in the button's onClick handler
@@ -473,7 +485,7 @@ export default component$(() => {
                     name="password"
                     type="password"
                     required
-                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
+                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-red-600 dark:focus:ring-red-500 bg-white dark:bg-gray-700"
                     placeholder="Choose a strong password"
                     minLength={6}
                   />
@@ -496,10 +508,33 @@ export default component$(() => {
                     id="fullName"
                     name="fullName"
                     type="text"
-                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
+                    class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-red-600 dark:focus:ring-red-500 bg-white dark:bg-gray-700"
                     placeholder="Your Name"
                   />
                 </div>
+              </div>
+
+              {/* User Type Selection */}
+              <div class="space-y-2">
+                <label for="userType" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Tipo de Usuario
+                </label>
+                <div class="relative">
+                  <select
+                    id="userType"
+                    name="userType"
+                    required
+                    class="block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 focus:ring-2 focus:ring-inset focus:ring-red-600 dark:focus:ring-red-500 bg-white dark:bg-gray-700"
+                  >
+                    <option value="" disabled selected>Selecciona un tipo</option>
+                    <option value="trabajador">Trabajador</option>
+                    <option value="despacho">Despacho</option>
+                    <option value="sindicato">Sindicato</option>
+                  </select>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Selecciona el tipo de usuario que mejor te describe
+                </p>
               </div>
 
               <div class="flex justify-between items-center">
@@ -523,7 +558,7 @@ export default component$(() => {
                     isLoading.value = true;
                     errorMessage.value = '';
                   }}
-                  class="flex justify-center items-center py-2 px-6 rounded-lg text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed" // Updated button gradient
+                  class="flex justify-center items-center py-2 px-6 rounded-lg text-white bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {isLoading.value ? (
                     <span class="flex items-center">
@@ -573,10 +608,11 @@ export default component$(() => {
         {/* Footer */}
         <div class="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
           {/* Updated Footer Links */}
-          By continuing, you agree to the Move On Academy
-          <a href="/terms" class="text-teal-600 hover:text-teal-500 dark:text-teal-400 dark:hover:text-teal-300 ml-1">Terms of Service</a>
-          <span class="mx-1">and</span>
-          <a href="/privacy" class="text-teal-600 hover:text-teal-500 dark:text-teal-400 dark:hover:text-teal-300">Privacy Policy</a>
+          Al continuar, aceptas los
+          <a href="/terms" class="text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 ml-1">Términos de Servicio</a>
+          <span class="mx-1">y</span>
+          <a href="/privacy" class="text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300">Política de Privacidad</a>
+          de DAI Off
         </div>
       </div>
 

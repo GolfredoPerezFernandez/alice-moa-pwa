@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for alice-moa on 2025-04-11T09:38:09-04:00
+# fly.toml app configuration file generated for daioff-app on 2025-04-25T11:53:26-04:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'alice-moa'
-primary_region = 'bog'
+app = 'daioff-app'
+primary_region = 'mad'
 
 [build]
 

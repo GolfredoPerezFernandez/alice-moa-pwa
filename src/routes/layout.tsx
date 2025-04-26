@@ -1,8 +1,8 @@
 import { component$, Slot, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
-import { Link, routeLoader$, useLocation } from '@builder.io/qwik-city';
-// Directly import the loader from its source file
-import { useAuthCheck } from './auth-check';
-// Remove the re-export line below
+import { routeLoader$, useLocation, Link } from '@builder.io/qwik-city';
+import { verifyAuth, getUserType } from '~/utils/auth';
+
+// Importar iconos
 import {
   LuHome,          // Keep for Home link
   LuBookOpen,      // For Courses
@@ -15,378 +15,537 @@ import {
   LuMenu,          // Mobile menu
   LuX,             // Mobile menu close
   LuSun,           // Light mode
-  LuMoon           // Dark mode
+  LuMoon,          // Dark mode
+  LuUser,          // For user icon/logo
+  LuCalendar,      // For absences calendar
+  LuClock,         // For timesheet/fichaje
+  LuSchool         // Para sección de capacitación
 } from '@qwikest/icons/lucide';
-import { verifyAuth } from '~/utils/auth';
 
-// Define the auth loader directly within the layout
-export const useLayoutAuthLoader = routeLoader$(async (requestEvent) => {
-  // No need to check for public paths here, as this layout doesn't run for /auth
-  // It runs for /, /about, /courses, /chat etc.
-  console.log('[Layout Loader] Starting auth check');
-  try {
-    // We only need the boolean status for the layout's conditional rendering
-    const isAuthenticated = await verifyAuth(requestEvent); // Verify using the cookie
-    console.log(`[Layout Loader] Is Authenticated: ${isAuthenticated}`);
-    // Return only the necessary boolean value
-    return { isAuthenticated };
-  } catch (error) {
-    // Handle potential errors during verification, though verifyAuth might handle redirects
-    console.error('[Layout Loader] Error checking auth:', error);
-    // Return unauthenticated state on error, but don't redirect from here
-    // Redirects for protected routes should happen in their specific loaders if needed
-    return { user_id: null, isAuthenticated: false };
+// Autenticación y verificación de usuario
+export const useAuthCheck = routeLoader$(async (requestEvent) => {
+  const isAuthenticated = await verifyAuth(requestEvent);
+  const userType = isAuthenticated ? getUserType(requestEvent) : null;
+  
+  // Check specialized user types for normal users
+  let isTrabajador = false;
+  let isUserSindicado = false;
+  let isUserDespacho = false;
+  
+  if (isAuthenticated && userType === 'normal') {
+    // Import the necessary functions
+    const { isSindicado, isDespacho } = await import('~/utils/auth');
+    
+    // Check if user is sindicado or despacho
+    isUserSindicado = await isSindicado(requestEvent);
+    isUserDespacho = await isDespacho(requestEvent);
+    
+    // If not sindicado and not despacho, they're a trabajador
+    isTrabajador = !isUserSindicado && !isUserDespacho;
   }
+  
+  return {
+    isAuthenticated,
+    userType,
+    userId: requestEvent.cookie.get('userId')?.value || null,
+    username: requestEvent.cookie.get('username')?.value || null,
+    isTrabajador,
+    isSindicado: isUserSindicado,
+    isDespacho: isUserDespacho
+  };
 });
 
 export default component$(() => {
-  // Use the loader defined within this layout file
-  const auth = useLayoutAuthLoader();
+  const auth = useAuthCheck();
   const location = useLocation();
-  const isDarkMode = useSignal(false);
+  
+  // Señales para controlar estado de la UI
   const isMobileMenuOpen = useSignal(false);
-  const isMarketplacePage = useSignal(false);
-
-  // Check if path matches the active route
-  const isActive = (path: string) => {
-    return location.url.pathname.startsWith(path);
-  };
-
-  // Toggle dark mode
-  useVisibleTask$(() => {
-    const prefersDark = document.documentElement.classList.contains('dark');
-    isDarkMode.value = prefersDark;
+  const isDarkMode = useSignal(false);
+  const isLoggingOut = useSignal(false);
+  
+  // Detectar preferencia de tema oscuro
+  useVisibleTask$(({ track }) => {
+    // Detectar si el usuario prefiere modo oscuro
+    const darkModePreference = window.matchMedia('(prefers-color-scheme: dark)');
+    const savedTheme = localStorage.getItem('theme');
     
-    // Check if we're on marketplace pages
-    isMarketplacePage.value = location.url.pathname.startsWith('/marketplace');
-  });
-
-  const toggleDarkMode = $(() => {
-    isDarkMode.value = !isDarkMode.value;
-    if (isDarkMode.value) {
+    if (savedTheme === 'dark' || (!savedTheme && darkModePreference.matches)) {
       document.documentElement.classList.add('dark');
+      isDarkMode.value = true;
     } else {
       document.documentElement.classList.remove('dark');
+      isDarkMode.value = false;
     }
+    
+    // Función para manejar cambios en la preferencia del sistema
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (!localStorage.getItem('theme')) {
+        if (e.matches) {
+          document.documentElement.classList.add('dark');
+          isDarkMode.value = true;
+        } else {
+          document.documentElement.classList.remove('dark');
+          isDarkMode.value = false;
+        }
+      }
+    };
+    
+    // Agregar listener
+    darkModePreference.addEventListener('change', handleChange);
+    
+    // Limpieza
+    return () => {
+      darkModePreference.removeEventListener('change', handleChange);
+    };
   });
-  // Special case for auth routes - they need a totally different layout
-  if (location.url.pathname.startsWith('/auth')) {
-    return <Slot />;
-  }
-
-  // All pages including marketplace should use the same navigation for consistency
-
-  // Update marketplace page status when URL changes (Moved here)
-  useVisibleTask$(({ track }) => {
-    track(() => location.url.pathname);
-    isMarketplacePage.value = location.url.pathname.startsWith('/marketplace');
+  
+  // Función para cambiar tema
+  const toggleDarkMode = $(() => {
+    if (isDarkMode.value) {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    } else {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    }
+    
+    isDarkMode.value = !isDarkMode.value;
   });
-
-  // Client-side log to check auth state
-  useVisibleTask$(({ track }) => {
-    track(() => auth.value); // Track changes to auth value
-    console.log('[Layout Client] Auth State:', auth.value);
-    console.log('[Layout Client] isAuthenticated:', auth.value?.isAuthenticated);
-  });
+  
+  // Función para determinar si una ruta está activa
+  const isActive = (path: string) => {
+    if (path === '/' && location.url.pathname === '/') {
+      return true;
+    }
+    
+    if (path !== '/' && location.url.pathname.startsWith(path)) {
+      return true;
+    }
+    
+    return false;
+  };
+  
   return (
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
-      {/* Top Navigation Bar */}
-      <header class="sticky top-0 z-50 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
-        <div class="container mx-auto px-4 flex justify-between items-center h-16">
-          {/* Logo and Brand */}
-          <div class="flex items-center">
-            <Link href="/" class="flex items-center group">
-              {/* Updated Logo Gradient and Icon */}
-              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-500 to-green-500 flex items-center justify-center text-white shadow group-hover:scale-105 transition-transform">
-                <LuGraduationCap class="w-5 h-5" /> {/* Graduation Cap Icon */}
+    <div class="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      {/* Navbar */}
+      <nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div class="flex justify-between h-16">
+            {/* Logo & Desktop Navigation */}
+            <div class="flex">
+              {/* Logo */}
+              <div class="flex-shrink-0 flex items-center">
+                <Link href="/" aria-label="Home">
+                  <LuGraduationCap class="w-9 h-9 text-red-600 dark:text-red-500" />
+                </Link>
               </div>
-              {/* Updated Brand Name and Gradient */}
-              <span class="ml-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
-                Move On Academy
-              </span>
-            </Link>
-          </div>
-
-          {/* Desktop Navigation */}
-          <nav class="hidden md:flex items-center space-x-1">
-            {/* Links for unauthenticated users */}
-            {/* Common Links (visible to all) */}
-            <Link
-              href="/"
-              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                location.url.pathname === '/' // Exact match for home
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
-            >
-              <div class="flex items-center">
-                <LuHome class="w-5 h-5 mr-1.5" />
-                <span>Home</span>
-              </div>
-            </Link>
-            <Link
-              href="/courses" // Example courses link
-              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                isActive('/courses')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
-            >
-              <div class="flex items-center">
-                <LuBookOpen class="w-5 h-5 mr-1.5" />
-                <span>Courses</span>
-              </div>
-            </Link>
-            <Link
-              href="/about" // Keep About link
-              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                isActive('/about')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
-            >
-              <div class="flex items-center">
-                <LuUsers class="w-5 h-5 mr-1.5" />
-                <span>About</span>
-              </div>
-            </Link>
-            
-            {/* Authenticated-only links */}
-            {auth.value?.isAuthenticated && (
-              <>
-                {/* Link to the Chat */}
+              
+              {/* Desktop Navigation */}
+              <div class="hidden sm:ml-6 sm:flex sm:items-center sm:space-x-3">
+                {/* Home Link */}
                 <Link
-                  href="/chat" // Keep Chat link
+                  href="/"
                   class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/chat')
-                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300' // Updated active colors
+                    isActive('/')
+                      ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
                       : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
                   }`}
                 >
                   <div class="flex items-center">
-                    <LuMessageSquare class="w-5 h-5 mr-1.5" /> {/* Keep chat icon */}
-                    <span>Chat</span>
+                    <LuHome class="w-5 h-5 mr-1.5" />
+                    <span>Inicio</span>
                   </div>
                 </Link>
-                {/* Add other relevant links if needed, e.g., Admin panel for admin users */}
+                
+                {/* Courses Link */}
                 <Link
-                  href="/auth/logout"
-                  class="px-3 py-2 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30 transition-colors"
+                  href="/docs"
+                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive('/docs')
+                      ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                  }`}
                 >
                   <div class="flex items-center">
-                    <LuLogOut class="w-5 h-5 mr-1.5" />
-                    <span>Logout</span>
+                    <LuBookOpen class="w-5 h-5 mr-1.5" />
+                    <span>Documentos</span>
                   </div>
                 </Link>
-              </>
-            )}
+                
+                {/* About Link */}
+                <Link
+                  href="/about"
+                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive('/about')
+                      ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  <div class="flex items-center">
+                    <LuUsers class="w-5 h-5 mr-1.5" />
+                    <span>Acerca de</span>
+                  </div>
+                </Link>
+                
+                {/* Chat Link - Only for authenticated users */}
+                {auth.value?.isAuthenticated && (
+                  <Link
+                    href="/chat"
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/chat')
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuMessageSquare class="w-5 h-5 mr-1.5" />
+                      <span>Chat</span>
+                    </div>
+                  </Link>
+                )}
+                
+                {/* Link to Absences - Only for trabajadores */}
+                {auth.value?.isTrabajador && (
+                  <Link
+                    href="/absences"
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/absences')
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuCalendar class="w-5 h-5 mr-1.5" />
+                      <span>Ausencias</span>
+                    </div>
+                  </Link>
+                )}
+                
+                {/* Link to Timesheet - Only for trabajadores */}
+                {auth.value?.isTrabajador && (
+                  <Link
+                    href="/timesheet"
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/timesheet')
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuClock class="w-5 h-5 mr-1.5" />
+                      <span>Fichaje</span>
+                    </div>
+                  </Link>
+                )}
+                
+                {/* Link to Capacitación - Only for sindicato/despacho users */}
+                {(auth.value?.isSindicado || auth.value?.isDespacho) && (
+                  <Link
+                    href="/capacitacion"
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/capacitacion')
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuGraduationCap class="w-5 h-5 mr-1.5" />
+                      <span>Capacitación</span>
+                    </div>
+                  </Link>
+                )}
+              </div>
+            </div>
             
-            {/* Login link for unauthenticated users */}
-            {!auth.value?.isAuthenticated && (
-              <Link
-                href="/auth" // Login link
-                class="px-3 py-2 rounded-md text-sm font-medium text-teal-600 hover:bg-teal-50 dark:text-teal-400 dark:hover:bg-teal-900/30 transition-colors" // Updated colors
+            {/* Right Side Menu: Dark Mode, User/Auth Controls, Mobile Menu Button */}
+            <div class="flex items-center gap-1">
+              {/* Dark Mode Toggle */}
+              <button
+                onClick$={toggleDarkMode}
+                class="text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 p-2 rounded-md"
+                aria-label={isDarkMode.value ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               >
+                {isDarkMode.value ? <LuSun class="w-5 h-5" /> : <LuMoon class="w-5 h-5" />}
+              </button>
+              
+              {/* Auth Controls */}
+              {auth.value?.isAuthenticated ? (
                 <div class="flex items-center">
-                  <LuLogIn class="w-5 h-5 mr-1.5" /> {/* Use Login icon */}
-                  <span>Login / Sign Up</span>
+                  {/* Profile/User Info */}
+                  <Link
+                    href="/profile"
+                    class={`hidden sm:flex px-3 py-2 rounded-md text-sm font-medium items-center transition-colors ${
+                      isActive('/profile')
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuUser class="w-5 h-5 mr-1.5" />
+                      <span>{auth.value.username || 'Perfil'}</span>
+                    </div>
+                  </Link>
+                  
+                  {/* Logout Button */}
+                  <Link
+                    href="/auth/logout"
+                    class="hidden sm:flex px-3 py-2 rounded-md text-sm font-medium items-center text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors"
+                    onClick$={() => {
+                      isLoggingOut.value = true;
+                    }}
+                  >
+                    <div class="flex items-center">
+                      {isLoggingOut.value ? (
+                        <>
+                          <div class="flex items-center justify-center">
+                            <div class="w-4 h-4 mr-2 rounded-full bg-gradient-to-r from-red-500 to-red-600 animate-pulse"></div>
+                            <span>Cerrando sesión...</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <LuLogOut class="w-5 h-5 mr-1.5" />
+                          <span>Cerrar sesión</span>
+                        </>
+                      )}
+                    </div>
+                  </Link>
                 </div>
-              </Link>
-            )}
-            
-            {/* Dark mode toggle (visible to all) */}
-            <button
-              onClick$={toggleDarkMode}
-              class="ml-2 p-2 rounded-full text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors"
-              aria-label="Toggle Dark Mode"
-            >
-              {isDarkMode.value ? <LuSun class="w-5 h-5" /> : <LuMoon class="w-5 h-5" />}
-            </button>
-          </nav>
-
-          {/* Mobile Menu Button */}
-          <div class="flex items-center md:hidden">
-            <button
-              onClick$={() => (isMobileMenuOpen.value = !isMobileMenuOpen.value)}
-              class="p-2 rounded-md text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 focus:outline-none"
-              aria-label="Toggle Menu"
-            >
-              {isMobileMenuOpen.value ? (
-                <LuX class="w-6 h-6" />
               ) : (
-                <LuMenu class="w-6 h-6" />
+                /* Login Link */
+                <Link
+                  href="/auth"
+                  class="hidden sm:flex px-3 py-2 rounded-md text-sm font-medium items-center text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors"
+                >
+                  <div class="flex items-center">
+                    <LuLogIn class="w-5 h-5 mr-1.5" />
+                    <span>Iniciar sesión</span>
+                  </div>
+                </Link>
               )}
-            </button>
-            
-            {/* Dark mode toggle on mobile */}
-            <button
-              onClick$={toggleDarkMode}
-              class="ml-2 p-2 rounded-full text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors"
-              aria-label="Toggle Dark Mode"
-            >
-              {isDarkMode.value ? <LuSun class="w-5 h-5" /> : <LuMoon class="w-5 h-5" />}
-            </button>
+              
+              {/* Mobile menu button */}
+              <button
+                onClick$={() => (isMobileMenuOpen.value = !isMobileMenuOpen.value)}
+                class="sm:hidden p-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 rounded-md"
+                aria-expanded={isMobileMenuOpen.value}
+                aria-controls="mobile-menu"
+                aria-label="Main menu"
+              >
+                {isMobileMenuOpen.value ? (
+                  <LuX class="w-6 h-6" />
+                ) : (
+                  <LuMenu class="w-6 h-6" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
-      </header>
-
-      {/* Mobile Navigation Menu */}
-      {isMobileMenuOpen.value && (
-        <div class="md:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-md animate-slideDown">
+        
+        {/* Mobile Menu */}
+        <div
+          class={`sm:hidden ${isMobileMenuOpen.value ? 'block' : 'hidden'}`}
+          id="mobile-menu"
+        >
           <div class="px-2 pt-2 pb-3 space-y-1">
-            {/* Common Links (visible to all) - Mobile */}
+            {/* Home Link */}
             <Link
               href="/"
               class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                location.url.pathname === '/'
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                isActive('/')
+                  ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
                   : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
               }`}
               onClick$={() => (isMobileMenuOpen.value = false)}
             >
               <div class="flex items-center">
                 <LuHome class="w-5 h-5 mr-3" />
-                <span>Home</span>
+                <span>Inicio</span>
               </div>
             </Link>
+            
+            {/* Courses Link */}
             <Link
-              href="/courses"
+              href="/docs"
               class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                isActive('/courses')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                isActive('/docs')
+                  ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
                   : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
               }`}
               onClick$={() => (isMobileMenuOpen.value = false)}
             >
               <div class="flex items-center">
                 <LuBookOpen class="w-5 h-5 mr-3" />
-                <span>Courses</span>
+                <span>Documentos</span>
               </div>
             </Link>
+            
+            {/* About Link */}
             <Link
               href="/about"
               class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                 isActive('/about')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                  ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
                   : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
               }`}
               onClick$={() => (isMobileMenuOpen.value = false)}
             >
               <div class="flex items-center">
                 <LuUsers class="w-5 h-5 mr-3" />
-                <span>About</span>
+                <span>Acerca de</span>
               </div>
             </Link>
             
-            {/* Authenticated-only links */}
+            {/* Chat Link - Only for authenticated users */}
             {auth.value?.isAuthenticated && (
+              <Link
+                href="/chat"
+                class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive('/chat')
+                    ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
+                onClick$={() => (isMobileMenuOpen.value = false)}
+              >
+                <div class="flex items-center">
+                  <LuMessageSquare class="w-5 h-5 mr-3" />
+                  <span>Chat</span>
+                </div>
+              </Link>
+            )}
+            
+            {/* Link to Absences - Only for trabajadores */}
+            {auth.value?.isTrabajador && (
+              <Link
+                href="/absences"
+                class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive('/absences')
+                    ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
+                onClick$={() => (isMobileMenuOpen.value = false)}
+              >
+                <div class="flex items-center">
+                  <LuCalendar class="w-5 h-5 mr-3" />
+                  <span>Ausencias</span>
+                </div>
+              </Link>
+            )}
+            
+            {/* Link to Timesheet - Only for trabajadores */}
+            {auth.value?.isTrabajador && (
+              <Link
+                href="/timesheet"
+                class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive('/timesheet')
+                    ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
+                onClick$={() => (isMobileMenuOpen.value = false)}
+              >
+                <div class="flex items-center">
+                  <LuClock class="w-5 h-5 mr-3" />
+                  <span>Fichaje</span>
+                </div>
+              </Link>
+            )}
+            
+            {/* Link to Capacitación - Only for sindicato/despacho users */}
+            {(auth.value?.isSindicado || auth.value?.isDespacho) && (
+              <Link
+                href="/capacitacion"
+                class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive('/capacitacion')
+                    ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
+                onClick$={() => (isMobileMenuOpen.value = false)}
+              >
+                <div class="flex items-center">
+                  <LuGraduationCap class="w-5 h-5 mr-3" />
+                  <span>Capacitación</span>
+                </div>
+              </Link>
+            )}
+            
+            {/* User Management */}
+            {auth.value?.isAuthenticated ? (
               <>
-                {/* Link to the Chat */}
+                {/* Profile Link */}
                 <Link
-                  href="/chat"
+                  href="/profile"
                   class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                    isActive('/chat')
-                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300' // Updated active colors
+                    isActive('/profile')
+                      ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
                       : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
                   }`}
                   onClick$={() => (isMobileMenuOpen.value = false)}
                 >
                   <div class="flex items-center">
-                    <LuMessageSquare class="w-5 h-5 mr-3" />
-                    <span>Chat</span>
+                    <LuUser class="w-5 h-5 mr-3" />
+                    <span>{auth.value.username || 'Perfil'}</span>
                   </div>
                 </Link>
-                {/* Add other relevant links if needed */}
+                
+                {/* Logout Link */}
                 <Link
                   href="/auth/logout"
-                  class="block px-3 py-2 rounded-md text-base font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30 transition-colors"
-                  onClick$={() => (isMobileMenuOpen.value = false)}
+                  class="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors"
+                  onClick$={() => {
+                    isMobileMenuOpen.value = false;
+                    isLoggingOut.value = true;
+                  }}
                 >
                   <div class="flex items-center">
-                    <LuLogOut class="w-5 h-5 mr-3" />
-                    <span>Logout</span>
+                    {isLoggingOut.value ? (
+                      <>
+                        <div class="flex items-center justify-center">
+                          <div class="w-4 h-4 mr-2 rounded-full bg-gradient-to-r from-red-500 to-red-600 animate-pulse"></div>
+                          <span>Cerrando sesión...</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <LuLogOut class="w-5 h-5 mr-3" />
+                        <span>Cerrar sesión</span>
+                      </>
+                    )}
                   </div>
                 </Link>
               </>
-            )}
-            {/* Login link for unauthenticated users */}
-            {!auth.value?.isAuthenticated && (
+            ) : (
+              /* Login Link */
               <Link
-                href="/auth" // Login link
-                class="block px-3 py-2 rounded-md text-base font-medium text-teal-600 hover:bg-teal-50 dark:text-teal-400 dark:hover:bg-teal-900/30 transition-colors" // Updated colors
+                href="/auth"
+                class="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors"
                 onClick$={() => (isMobileMenuOpen.value = false)}
               >
                 <div class="flex items-center">
-                  <LuLogIn class="w-5 h-5 mr-3" /> {/* Use Login icon */}
-                  <span>Login / Sign Up</span>
+                  <LuLogIn class="w-5 h-5 mr-3" />
+                  <span>Iniciar sesión</span>
                 </div>
               </Link>
             )}
-            {/* End of conditional blocks */}
           </div>
         </div>
-      )}
-
-      {/* Main Content */}
+      </nav>
+      
+      {/* Main Content Area */}
       <main class="container mx-auto py-4 px-4 md:px-6">
-        <Slot />
+        <div style={{viewTransitionName: 'main-content'}}>
+          <Slot />
+        </div>
       </main>
-
-      {/* Footer - Not displayed on chat page */}
-      {!location.url.pathname.startsWith('/chat') && (
-        <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-6 mt-auto">
-          <div class="container mx-auto px-4">
-            <div class="flex flex-col md:flex-row justify-between items-center">
-              <div class="flex items-center mb-4 md:mb-0">
-                {/* Updated Footer Logo */}
-                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-500 to-green-500 flex items-center justify-center text-white shadow">
-                   <LuGraduationCap class="w-5 h-5" />
-                </div>
-                {/* Updated Footer Brand Name */}
-                <span class="ml-2 text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
-                  Move On Academy
-                </span>
-              </div>
-              <div class="text-center md:text-right text-sm text-gray-600 dark:text-gray-400">
-                <p>© {new Date().getFullYear()} Move On Academy. All rights reserved.</p>
-                <div class="mt-2 space-x-4">
-                  {/* Updated Footer Link Colors */}
-                  <Link href="/terms" class="hover:text-teal-600 dark:hover:text-teal-400">Terms</Link>
-                  <Link href="/privacy" class="hover:text-teal-600 dark:hover:text-teal-400">Privacy</Link>
-                  <Link href="/contact" class="hover:text-teal-600 dark:hover:text-teal-400">Contact</Link>
-                </div>
-              </div>
-            </div>
+      
+      {/* Footer */}
+      <footer class="mt-auto py-6 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+        <div class="container mx-auto px-4 md:px-6">
+          <div class="text-center text-gray-600 dark:text-gray-400 text-sm">
+            &copy; {new Date().getFullYear()} DAI-OFF. Todos los derechos reservados.
           </div>
-        </footer>
-      )}
-
-      {/* Custom animations and styles */}
-      <style>{`
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .animate-slideDown {
-          animation: slideDown 0.2s ease-out;
-        }
-        
-        /* Hide scrollbars but keep functionality */
-        .scrollbar-hide {
-          -ms-overflow-style: none;  /* IE and Edge */
-          scrollbar-width: none;  /* Firefox */
-        }
-        
-        .scrollbar-hide::-webkit-scrollbar {
-          display: none;  /* Chrome, Safari and Opera */
-        }
-        
-        html, body {
-          overscroll-behavior: none;
-        }
-      `}</style>
+        </div>
+      </footer>
     </div>
   );
-  
-}); // End of component$
+});

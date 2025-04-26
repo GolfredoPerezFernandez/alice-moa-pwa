@@ -1,12 +1,12 @@
 {
   "$schema": "https://json.schemastore.org/web-manifest-combined.json",
-  "name": "qwik-project-name",
-  "short_name": "Welcome to Qwik",
+  "name": "DAI Off",
+  "short_name": "DAI Off",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#fff",
-  "theme_color": "#fff",
-  "description": "A Qwik project app.",
+  "theme_color": "#e53e3e",
+  "description": "Tu Defensor Laboral Digital - Asesoría legal laboral personalizada y en tiempo real.",
   "screenshots": [
     {
       "src": "/screenshot.png",

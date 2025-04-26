@@ -1,4 +1,5 @@
 import { RequestEvent, RequestEventBase } from '@builder.io/qwik-city';
+import { tursoClient } from './turso';
 
 // Convert string to ArrayBuffer
 function stringToArrayBuffer(str: string): ArrayBuffer {
@@ -160,6 +161,56 @@ export const isCoordinator = (requestEvent: RequestEventBase): boolean => {
   return getUserType(requestEvent) === 'coordinator';
 };
 
+// Verifica si el usuario es de tipo "sindicado"
+export const isSindicado = async (requestEvent: RequestEventBase): Promise<boolean> => {
+  try {
+    const user_id = getUserId(requestEvent);
+    if (!user_id) return false;
+    
+    const client = tursoClient(requestEvent);
+    const result = await client.execute({
+      sql: 'SELECT sector FROM contract_details WHERE user_id = ? AND sector LIKE ?',
+      args: [user_id, '%sindicato%']
+    });
+    
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('[AUTH] Error checking sindicado status:', error);
+    return false;
+  }
+};
+
+// Verifica si el usuario es de tipo "despacho"
+export const isDespacho = async (requestEvent: RequestEventBase): Promise<boolean> => {
+  try {
+    const user_id = getUserId(requestEvent);
+    if (!user_id) return false;
+    
+    const client = tursoClient(requestEvent);
+    const result = await client.execute({
+      sql: 'SELECT sector FROM contract_details WHERE user_id = ? AND sector LIKE ?',
+      args: [user_id, '%despacho%']
+    });
+    
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('[AUTH] Error checking despacho status:', error);
+    return false;
+  }
+};
+
+// Verifica si el usuario puede crear/gestionar cursos de capacitación
+export const canManageCapacitacion = async (requestEvent: RequestEventBase): Promise<boolean> => {
+  // Los administradores siempre pueden gestionar cursos
+  if (isAdmin(requestEvent)) return true;
+  
+  // Los usuarios de tipo sindicado o despacho pueden gestionar cursos
+  const userIsSindicado = await isSindicado(requestEvent);
+  const userIsDespacho = await isDespacho(requestEvent);
+  
+  return userIsSindicado || userIsDespacho;
+};
+
 export const verifyAuth = async (requestEvent: RequestEventBase): Promise<boolean> => {
   console.log('[AUTH] Verifying authentication');
   const user_id = requestEvent.cookie.get('auth_token')?.value;
@@ -170,11 +221,55 @@ export const verifyAuth = async (requestEvent: RequestEventBase): Promise<boolea
     return false;
   }
   
-  // Removed automatic cookie refresh on verification.
-  // Cookies will rely on their maxAge set during login.
-  // If session extension is needed later, a more robust mechanism
-  // (e.g., checking expiry time) should be implemented.
+  // Get user type from cookie
+  const user_type = requestEvent.cookie.get('user_type')?.value as 'admin' | 'coordinator' | 'normal';
+  if (!user_type) {
+    console.log('[AUTH] No user_type found, using default normal');
+  }
   
-  console.log('[AUTH] User authenticated successfully');
+  // Session refresh mechanism - extend session on each verification
+  // This ensures the session lasts 24 hours from the last activity, not just login
+  const maxAge = 24 * 60 * 60; // 24 hours in seconds
+  
+  // Refresh auth token cookie
+  requestEvent.cookie.set('auth_token', user_id, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: maxAge,
+  });
+  
+  // Refresh user type cookie
+  requestEvent.cookie.set('user_type', user_type || 'normal', {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: maxAge,
+  });
+  
+  // Refresh session active cookie
+  requestEvent.cookie.set('session_active', 'true', {
+    path: '/',
+    httpOnly: false,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: maxAge,
+  });
+  
+  // Also refresh session_expires in database if needed
+  try {
+    const client = tursoClient(requestEvent);
+    await client.execute({
+      sql: 'UPDATE users SET session_expires = ? WHERE id = ?',
+      args: [new Date(Date.now() + maxAge * 1000), user_id]
+    });
+  } catch (error) {
+    console.error('[AUTH] Error refreshing session in database:', error);
+    // Continue anyway, as we've already refreshed the cookies
+  }
+  
+  console.log('[AUTH] User authenticated successfully and session refreshed');
   return true;
 };

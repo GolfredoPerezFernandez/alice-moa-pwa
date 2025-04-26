@@ -24,15 +24,15 @@
     --card-foreground: 240 5.9% 10%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --primary: 0 93.5% 81.8%;
-    --primary-foreground: 0 0% 0%;
+    --primary: 0 73% 61%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 240 5.9% 10%;
     --secondary-foreground: 0 0% 100%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+    --accent: 0 73% 97%;
+    --accent-foreground: 0 73% 61%;
     --alert: 0 84.2% 60.2%;
     --alert-foreground: 0 0% 98%;
-    --ring: 240 5.9% 10%;
+    --ring: 0 73% 61%;
     --border-width: 0px;
     --border-radius: 0.5rem;
     --shadow-base: 0 1px 2px 0 rgba(0, 0, 0, 0.01);
@@ -56,15 +56,15 @@
     --card-foreground: 0 0% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
-    --primary: 0 93.5% 81.8%;
-    --primary-foreground: 0 0% 0%;
+    --primary: 0 73% 61%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 0 0% 0%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 0 40% 20%;
+    --accent-foreground: 0 73% 61%;
     --alert: 0 84.2% 60.2%;
     --alert-foreground: 0 0% 98%;
-    --ring: 240 4.9% 83.9%;
+    --ring: 0 73% 61%;
     --border-width: 0px;
     --border-radius: 0.5rem;
     --shadow-base: 0 1px 2px 0 rgba(0, 0, 0, 0.01);
@@ -111,3 +111,73 @@ body {
 }
 
 /* Keep any other essential global styles below */
+
+/* View Transitions */
+.item {
+  /* Alias to target all .item with a view-transition-name */
+  view-transition-class: animated-item;
+}
+
+/* Animate when item didn't exist in the previous page */
+::view-transition-new(.animated-item):only-child {
+  animation: fade-in 200ms;
+}
+
+/* Animate when item doesn't exist in the next page */
+::view-transition-old(.animated-item):only-child {
+  animation: fade-out 200ms;
+}
+
+/* Page transitions */
+::view-transition-old(root) {
+  animation: fade-out 250ms ease-out;
+}
+
+::view-transition-new(root) {
+  animation: fade-in 400ms ease-out;
+}
+
+/* Animation keyframes */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+/* Custom view transitions */
+.page-content {
+  view-transition-name: page-content;
+}
+
+.hero-section {
+  view-transition-name: hero-section;
+}
+
+.card-item {
+  view-transition-name: card-item;
+}
+
+.nav-logo {
+  view-transition-name: nav-logo;
+}
+
+/* Ensure transition applies only to visible elements */
+[data-has-view-transition="true"] {
+  view-transition-class: animated-item;
+}

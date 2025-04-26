@@ -3,6 +3,7 @@ import {
   QwikCityProvider,
   RouterOutlet,
   ServiceWorkerRegister,
+  useNavigate,
 } from "@builder.io/qwik-city";
 import { RouterHead } from "./components/router-head/router-head";
 
@@ -17,14 +18,14 @@ export default component$(() => {
    */
 
   return (
-    <QwikCityProvider>
+    <QwikCityProvider viewTransition>
       <head>
         <meta charSet="utf-8" />
         <link rel="manifest" href="/manifest.json" />
         <RouterHead />
         <ServiceWorkerRegister />
       </head>
-      <body lang="en">
+      <body lang="es">
         <RouterOutlet />
       </body>
     </QwikCityProvider>

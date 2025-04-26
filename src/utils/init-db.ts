@@ -44,6 +44,122 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
 
       -- Index for faster history retrieval per user
       CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON chat_history(user_id);
+      
+      -- Contract Details Table
+      CREATE TABLE IF NOT EXISTS contract_details (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          community TEXT NOT NULL, -- Comunidad
+          province TEXT NOT NULL, -- Provincia
+          profession TEXT NOT NULL, -- Profesión
+          contract_start_date DATE NOT NULL, -- Fecha de inicio del contrato
+          contract_end_date DATE, -- Fecha de finalización del contrato (puede ser NULL para contratos indefinidos)
+          contract_type TEXT NOT NULL, -- Tipo de contrato (Indefinido, Temporal, etc.)
+          probation_period TEXT NOT NULL, -- Periodo de prueba (Sí, No)
+          work_schedule_type TEXT NOT NULL, -- Tipo de jornada (Completa, Parcial, etc.)
+          weekly_hours INTEGER, -- Horas semanales
+          net_salary DECIMAL(10, 2), -- Salario Neto
+          gross_salary DECIMAL(10, 2), -- Salario Bruto
+          extra_payments TEXT, -- Pagas Extras
+          sector TEXT, -- Sector / Sindicato
+          contribution_group TEXT, -- Grupo de Cotización
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      -- Create index for better performance
+      CREATE INDEX IF NOT EXISTS idx_contract_details_user_id ON contract_details(user_id);
+
+      -- User Absences Table (Registro de ausencias laborales)
+      CREATE TABLE IF NOT EXISTS user_absences (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          start_date DATE NOT NULL,
+          end_date DATE NOT NULL,
+          absence_type TEXT NOT NULL CHECK (absence_type IN ('illness', 'vacation', 'personal', 'other')),
+          description TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      -- Create indexes for better performance
+      CREATE INDEX IF NOT EXISTS idx_absences_user_id ON user_absences(user_id);
+      CREATE INDEX IF NOT EXISTS idx_absences_date_range ON user_absences(start_date, end_date);
+
+      -- User Timesheet Table for Check-in/Check-out Records
+      CREATE TABLE IF NOT EXISTS user_timesheet (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          check_in_time TIMESTAMP NOT NULL,
+          check_out_time TIMESTAMP,
+          check_in_location TEXT, -- JSON string with latitude and longitude for check-in
+          check_out_location TEXT, -- JSON string with latitude and longitude for check-out
+          total_minutes INTEGER, -- Will be calculated upon check-out
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      -- Create indexes for better performance
+      CREATE INDEX IF NOT EXISTS idx_timesheet_user_id ON user_timesheet(user_id);
+      CREATE INDEX IF NOT EXISTS idx_timesheet_date ON user_timesheet(check_in_time);
+
+      -- Tabla para los cursos de capacitación
+      CREATE TABLE IF NOT EXISTS cursos_capacitacion (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          titulo TEXT NOT NULL,
+          descripcion TEXT NOT NULL,
+          descripcion_completa TEXT,
+          categoria TEXT CHECK (categoria IN ('seguridad', 'derechos', 'prevencion', 'igualdad', 'salud')),
+          instructor TEXT,
+          duracion TEXT,
+          imagen_color TEXT DEFAULT 'bg-red-100 dark:bg-red-900/20',
+          creado_por INTEGER NOT NULL,
+          fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (creado_por) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      -- Tabla para los módulos de los cursos
+      CREATE TABLE IF NOT EXISTS modulos_curso (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          curso_id INTEGER NOT NULL,
+          titulo TEXT NOT NULL,
+          tipo TEXT CHECK (tipo IN ('video', 'document', 'quiz', 'interactive')),
+          orden INTEGER NOT NULL,
+          url_contenido TEXT,
+          FOREIGN KEY (curso_id) REFERENCES cursos_capacitacion(id) ON DELETE CASCADE
+      );
+
+      -- Tabla para los recursos descargables de los cursos
+      CREATE TABLE IF NOT EXISTS recursos_curso (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          curso_id INTEGER NOT NULL,
+          titulo TEXT NOT NULL,
+          tipo TEXT CHECK (tipo IN ('pdf', 'excel', 'image', 'document', 'video')),
+          url_recurso TEXT,
+          FOREIGN KEY (curso_id) REFERENCES cursos_capacitacion(id) ON DELETE CASCADE
+      );
+
+      -- Tabla para el progreso de los usuarios en los cursos
+      CREATE TABLE IF NOT EXISTS progreso_curso (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          usuario_id INTEGER NOT NULL,
+          modulo_id INTEGER NOT NULL,
+          completado BOOLEAN DEFAULT FALSE,
+          fecha_completado TIMESTAMP,
+          FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (modulo_id) REFERENCES modulos_curso(id) ON DELETE CASCADE,
+          UNIQUE(usuario_id, modulo_id)
+      );
+
+      -- Índices para mejorar el rendimiento
+      CREATE INDEX IF NOT EXISTS idx_cursos_categoria ON cursos_capacitacion(categoria);
+      CREATE INDEX IF NOT EXISTS idx_cursos_creador ON cursos_capacitacion(creado_por);
+      CREATE INDEX IF NOT EXISTS idx_modulos_curso ON modulos_curso(curso_id);
+      CREATE INDEX IF NOT EXISTS idx_recursos_curso ON recursos_curso(curso_id);
+      CREATE INDEX IF NOT EXISTS idx_progreso_usuario ON progreso_curso(usuario_id);
+      CREATE INDEX IF NOT EXISTS idx_progreso_modulo ON progreso_curso(modulo_id);
     `;
     
     // Split the SQL into separate statements and execute them
@@ -59,18 +175,26 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
     }
     
     // Verify the tables were created
-    // Verify both tables were created
+    // Verify tables were created
     const tablesResult = await client.batch([
       "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history'"
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history'",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='user_absences'",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='user_timesheet'",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='cursos_capacitacion'",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='modulos_curso'",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='recursos_curso'",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='progreso_curso'"
     ], 'read');
     
-    // Check if both results have rows indicating the tables exist
-    if (tablesResult[0].rows.length === 0 || tablesResult[1].rows.length === 0) {
-      console.error('[DB-INIT] Verification failed: users or chat_history table not found.');
+    // Check if all results have rows indicating the tables exist
+    const allTablesExist = tablesResult.every(result => result.rows.length > 0);
+    
+    if (!allTablesExist) {
+      console.error('[DB-INIT] Verification failed: one or more required tables not found.');
       return {
         success: false,
-        message: 'Required tables (users, chat_history) were not created successfully'
+        message: 'One or more required tables were not created successfully'
       };
     }
     
