@@ -2,7 +2,7 @@ import { component$, useSignal, useVisibleTask$ } from "@builder.io/qwik";
 import { routeLoader$, Link, useLocation } from '@builder.io/qwik-city';
 import { LuArrowLeft, LuPlus, LuDownload, LuPlay, LuPencil, LuCheckCircle } from '@qwikest/icons/lucide';
 import { tursoClient } from "~/utils/turso";
-import { getUserId, canManageCapacitacion } from "~/utils/auth";
+import { getUserId, getUserType } from "~/utils/auth";
 
 // Definición de tipos
 interface CursoCapacitacion {
@@ -94,9 +94,11 @@ export const useCursoLoader = routeLoader$(async (requestEvent) => {
       url_recurso: row.url_recurso ? String(row.url_recurso) : undefined
     }));
     
-    // Verificar si el usuario puede gestionar el curso
-    const puedeGestionar = await canManageCapacitacion(requestEvent);
-    
+    // Verificar si el usuario puede gestionar el curso (basado en el tipo de usuario de la cookie)
+    const userType = getUserType(requestEvent);
+    const puedeGestionar = userType === 'despacho' || userType === 'sindicato';
+    console.log('[CAPACITACION] User type from cookie:', userType, 'Puede gestionar:', puedeGestionar);
+
     // Obtener progreso del usuario si está autenticado
     const userId = getUserId(requestEvent);
     let modulosCompletados: number[] = [];

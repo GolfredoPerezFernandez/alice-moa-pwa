@@ -1,54 +1,39 @@
 import { component$, Slot } from '@builder.io/qwik';
 import { routeLoader$, Link, useLocation } from '@builder.io/qwik-city';
 import { LuFileText, LuHome, LuMessageSquare } from '@qwikest/icons/lucide';
+import { verifyAuth, getUserType } from '~/utils/auth';
 
 // Verificar autenticación y permisos
-export const useAuthCheck = routeLoader$(async ({ cookie, redirect }) => {
-  const authToken = cookie.get('auth_token')?.value;
+export const useAuthCheck = routeLoader$(async (requestEvent) => {
+  console.log('[DOCUMENTOS-LEGALES] Verificando autenticación y permisos');
   
-  // Para simplificar durante el desarrollo, hacemos que la verificación sea más flexible
-  // En una aplicación real, esto debería ser más estricto
-  
-  try {
-    // Si hay un token, verificamos el tipo de usuario (despacho o sindicato)
-    if (authToken) {
-      // Para este ejemplo, asumimos que cualquier usuario autenticado
-      // puede ser despacho o sindicato
-      // En un caso real, aquí verificaríamos en la BD el tipo de usuario
-      
-      // Para compatibilidad con la lógica existente, simular tipos basados en el token
-      // Si el token comienza con d_ es despacho, si comienza con s_ es sindicato
-      const isDespacho = authToken.startsWith('d_') || true; // Temporalmente permitimos todos
-      const isSindicato = authToken.startsWith('s_') || false;
-      
-      return {
-        isAuthenticated: true,
-        isDespacho,
-        isSindicato,
-        userId: authToken
-      };
-    }
-    
-    // Si no hay token de autenticación, por ahora retornamos un usuario de prueba
-    // En producción esto debería redirigir a login
-    console.log("Sin token de autenticación: creando usuario de prueba");
-    return {
-      isAuthenticated: true,
-      isDespacho: true,
-      isSindicato: false,
-      userId: "test_user"
-    };
-    
-  } catch (error) {
-    // Si hay algún error en la verificación, creamos un usuario de prueba
-    console.error("Error al verificar permisos:", error);
-    return {
-      isAuthenticated: true,
-      isDespacho: true,
-      isSindicato: false,
-      userId: "error_user"
-    };
+  // Verificar si el usuario está autenticado
+  const isAuthenticated = await verifyAuth(requestEvent);
+  if (!isAuthenticated) {
+    console.log('[DOCUMENTOS-LEGALES] Usuario no autenticado, redirigiendo a login');
+    throw requestEvent.redirect(302, '/auth');
   }
+  
+  // Get user type from cookie
+  const userType = getUserType(requestEvent);
+  console.log('[DOCUMENTOS-LEGALES] User type from cookie:', userType);
+
+  // Verificar si el usuario es de tipo despacho o sindicato
+  const userIsDespachoOrSindicato = userType === 'despacho' || userType === 'sindicato';
+  
+  // Si no es ni despacho ni sindicato, no puede acceder a esta sección
+  if (!userIsDespachoOrSindicato) {
+    console.log('[DOCUMENTOS-LEGALES] User type not authorized for this section, redirecting to home');
+    throw requestEvent.redirect(302, '/');
+  }
+  
+  // Usuario autorizado
+  return {
+    isAuthenticated: true,
+    userType: userType,
+    isDespachoOrSindicato: userIsDespachoOrSindicato,
+    userId: requestEvent.cookie.get('auth_token')?.value || null
+  };
 });
 
 export default component$(() => {

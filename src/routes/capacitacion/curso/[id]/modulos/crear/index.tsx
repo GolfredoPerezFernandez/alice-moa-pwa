@@ -5,7 +5,7 @@ import {
   LuChevronDown, LuFileText, LuVideo, LuBrain, LuMousePointer
 } from '@qwikest/icons/lucide';
 import { tursoClient } from "~/utils/turso";
-import { canManageCapacitacion } from "~/utils/auth";
+import { getUserType } from "~/utils/auth";
 
 // Interfaces
 interface ModuloCurso {
@@ -21,8 +21,10 @@ interface ModuloCurso {
 export const useCursoModulosLoader = routeLoader$(async (requestEvent) => {
   const cursoId = requestEvent.params.id;
   
-  // Verificar que el usuario tenga permisos para gestionar capacitaciones
-  const puedeGestionar = await canManageCapacitacion(requestEvent);
+  // Verificar que el usuario tenga permisos para gestionar capacitaciones (basado en el tipo de usuario de la cookie)
+  const userType = getUserType(requestEvent);
+  const puedeGestionar = userType === 'despacho' || userType === 'sindicato';
+  console.log('[CAPACITACION - CREAR MODULO] User type from cookie:', userType, 'Puede gestionar:', puedeGestionar);
   if (!puedeGestionar) {
     throw requestEvent.error(403, 'No tiene permisos para gestionar módulos');
   }
@@ -79,8 +81,9 @@ export const useCrearModuloAction = routeAction$(
   async (data, requestEvent) => {
     const cursoId = requestEvent.params.id;
     
-    // Verificar permisos
-    const puedeGestionar = await canManageCapacitacion(requestEvent);
+    // Verificar permisos (basado en el tipo de usuario de la cookie)
+    const userType = getUserType(requestEvent);
+    const puedeGestionar = userType === 'despacho' || userType === 'sindicato';
     if (!puedeGestionar) {
       return {
         success: false,
@@ -147,8 +150,9 @@ export const useEliminarModuloAction = routeAction$(
   async (data, requestEvent) => {
     const cursoId = requestEvent.params.id;
     
-    // Verificar permisos
-    const puedeGestionar = await canManageCapacitacion(requestEvent);
+    // Verificar permisos (basado en el tipo de usuario de la cookie)
+    const userType = getUserType(requestEvent);
+    const puedeGestionar = userType === 'despacho' || userType === 'sindicato';
     if (!puedeGestionar) {
       return {
         success: false,
@@ -225,8 +229,9 @@ export const useCambiarOrdenAction = routeAction$(
   async (data, requestEvent) => {
     const cursoId = requestEvent.params.id;
     
-    // Verificar permisos
-    const puedeGestionar = await canManageCapacitacion(requestEvent);
+    // Verificar permisos (basado en el tipo de usuario de la cookie)
+    const userType = getUserType(requestEvent);
+    const puedeGestionar = userType === 'despacho' || userType === 'sindicato';
     if (!puedeGestionar) {
       return {
         success: false,

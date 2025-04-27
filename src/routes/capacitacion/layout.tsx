@@ -1,6 +1,6 @@
 import { component$, Slot } from "@builder.io/qwik";
 import { routeLoader$ } from '@builder.io/qwik-city';
-import { verifyAuth, canManageCapacitacion } from "~/utils/auth";
+import { verifyAuth, getUserType } from "~/utils/auth";
 
 export const useAuthCheck = routeLoader$(async (requestEvent) => {
   const isAuthenticated = await verifyAuth(requestEvent);
@@ -9,10 +9,16 @@ export const useAuthCheck = routeLoader$(async (requestEvent) => {
     throw requestEvent.redirect(302, '/auth');
   }
 
-  // Verifica si el usuario puede acceder a la ruta de capacitación
-  const canAccess = await canManageCapacitacion(requestEvent);
+  // Get user type from cookie
+  const userType = getUserType(requestEvent);
+  console.log('[CAPACITACION] User type from cookie:', userType);
+
+  // Verifica si el usuario es de tipo despacho o sindicato
+  const canAccess = userType === 'despacho' || userType === 'sindicato';
+
   if (!canAccess) {
     // Redirige al inicio si no tiene permisos
+    console.log('[CAPACITACION] User type not authorized for this section, redirecting to home');
     throw requestEvent.redirect(302, '/');
   }
 

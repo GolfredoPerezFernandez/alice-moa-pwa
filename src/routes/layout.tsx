@@ -28,21 +28,18 @@ export const useAuthCheck = routeLoader$(async (requestEvent) => {
   const isAuthenticated = await verifyAuth(requestEvent);
   const userType = isAuthenticated ? getUserType(requestEvent) : null;
   
-  // Check specialized user types for normal users
-  let isTrabajador = false;
-  let isUserSindicado = false;
-  let isUserDespacho = false;
+  // Determine user type flags based on the userType from the cookie
+  const isTrabajador = userType === 'trabajador';
+  const isUserSindicado = userType === 'sindicato';
+  const isUserDespacho = userType === 'despacho';
   
-  if (isAuthenticated && userType === 'normal') {
-    // Import the necessary functions
-    const { isSindicado, isDespacho } = await import('~/utils/auth');
-    
-    // Check if user is sindicado or despacho
-    isUserSindicado = await isSindicado(requestEvent);
-    isUserDespacho = await isDespacho(requestEvent);
-    
-    // If not sindicado and not despacho, they're a trabajador
-    isTrabajador = !isUserSindicado && !isUserDespacho;
+  if (isAuthenticated) {
+    console.log('[LAYOUT] User roles determined from cookie:', {
+      userType,
+      isTrabajador,
+      isSindicado: isUserSindicado,
+      isDespacho: isUserDespacho
+    });
   }
   
   return {
@@ -198,7 +195,7 @@ export default component$(() => {
                   </div>
                 </Link>
                 
-                {/* Chat Link - Only for authenticated users */}
+                {/* Chat Link - Only for sindicato/despacho users */}
                 {auth.value?.isAuthenticated && (
                   <Link
                     href="/chat"
@@ -298,7 +295,30 @@ export default component$(() => {
               
               {/* Auth Controls */}
               {auth.value?.isAuthenticated ? (
-                <div class="flex items-center">
+                <div class="flex items-center space-x-2">
+                  {/* User Type Badge */}
+                  {auth.value?.userType && (
+                    <div class="hidden sm:flex">
+                      <span class={`px-2 py-1 text-xs rounded-full font-medium ${
+                        auth.value.userType === 'trabajador'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300'
+                          : auth.value.userType === 'despacho'
+                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300'
+                            : auth.value.userType === 'sindicato'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
+                                : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                      }`}>
+                        {auth.value.userType === 'trabajador'
+                          ? 'Trabajador'
+                          : auth.value.userType === 'despacho'
+                            ? 'Despacho'
+                            : auth.value.userType === 'sindicato'
+                                ? 'Sindicato'
+                                : 'Usuario'}
+                      </span>
+                    </div>
+                  )}
+                  
                   {/* Profile/User Info */}
                   <Link
                     href="/profile"
@@ -424,7 +444,7 @@ export default component$(() => {
               </div>
             </Link>
             
-            {/* Chat Link - Only for authenticated users */}
+            {/* Chat Link - For all authenticated users */}
             {auth.value?.isAuthenticated && (
               <Link
                 href="/chat"
@@ -518,6 +538,29 @@ export default component$(() => {
             {auth.value?.isAuthenticated ? (
               <>
                 {/* Profile Link */}
+                {/* User Type Badge for Mobile */}
+                {auth.value?.userType && (
+                  <div class="mb-2 px-3 py-2">
+                    <span class={`px-2 py-1 text-xs rounded-full font-medium ${
+                      auth.value.userType === 'trabajador'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300'
+                        : auth.value.userType === 'despacho'
+                          ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300'
+                          : auth.value.userType === 'sindicato'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
+                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                    }`}>
+                      {auth.value.userType === 'trabajador'
+                        ? 'Trabajador'
+                        : auth.value.userType === 'despacho'
+                          ? 'Despacho'
+                          : auth.value.userType === 'sindicato'
+                            ? 'Sindicato'
+                            : 'Usuario'}
+                    </span>
+                  </div>
+                )}
+
                 <Link
                   href="/profile"
                   class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${

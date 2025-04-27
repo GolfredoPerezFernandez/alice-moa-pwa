@@ -134,28 +134,7 @@ export default component$(() => {
   return (
     <div class="mis-documentos-page">
       {/* Panel de depuración - Solo visible en desarrollo */}
-      <div style="background-color: #f0f8ff; padding: 10px; margin-bottom: 15px; border-radius: 5px; border: 1px solid #ccc; font-family: monospace; font-size: 12px;">
-        <h3>DEBUG INFO (Timestamp: {timestamp})</h3>
-        <p>Auth ID: {authCheck.value.userId || 'No autenticado'}</p>
-        <p>Es Despacho: {authCheck.value.isDespacho ? 'Sí' : 'No'}</p>
-        <p>Documentos cargados: {documentosResult.value.documentos.length}</p>
-        <details>
-          <summary>Ver detalles completos</summary>
-          <pre>{JSON.stringify(documentosResult.value.documentos.map(d => ({
-            id: d.id,
-            titulo: d.titulo,
-            origen: d.origen,
-            categoria: d.categoria,
-            fecha: d.fecha
-          })), null, 2)}</pre>
-        </details>
-        
-        <h4>Resumen por origen:</h4>
-        <p>Asistente: {documentosResult.value.documentos.filter(d => d.origen === 'asistente').length}</p>
-        <p>Generador: {documentosResult.value.documentos.filter(d => d.origen === 'generador').length}</p>
-        <p>Otros: {documentosResult.value.documentos.filter(d => d.origen !== 'asistente' && d.origen !== 'generador').length}</p>
-      </div>
-      
+     
       <div class="page-header">
         <h1 class="page-title">Mis Documentos</h1>
         <p class="page-description">

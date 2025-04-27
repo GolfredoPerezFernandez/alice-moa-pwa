@@ -57,86 +57,45 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
   const {
     email,
     password,
-    fullName,
-    userType: selectedUserType
+    fullName, // Changed from studentName
+    userType: selectedUserType // Add userType from form
+    // Removed schoolId, gradeId
   } = data as {
     email: string;
     password: string;
-    fullName?: string;
-    userType?: string;
+    fullName?: string; // Added fullName for general user registration
+    userType?: string; // Add userType field
   };
 
   try {
     const passwordHash = await hashPassword(password);
     // First registration is admin, others are based on selection or default to normal
-    const firstUserCheck = await client.execute({
-      sql: 'SELECT COUNT(*) as count FROM users',
-      args: []
-    });
-    
-    const isFirstUser = firstUserCheck.rows.length > 0 && firstUserCheck.rows[0].count === 0;
     // Declare variables at the start of the try block
     let userId: number | bigint | undefined;
-    let userType: 'admin' | 'coordinator' | 'normal';
+    const userType: 'trabajador' | 'despacho' | 'sindicato' = selectedUserType as 'trabajador' | 'despacho' | 'sindicato';
 
-    // First user is admin, otherwise use selected type or default to normal
-    userType = isFirstUser ? 'admin' : 'normal';
-    
     // Insert user with name if provided
     const sql = fullName
       ? 'INSERT INTO users (email, password_hash, type, name) VALUES (?, ?, ?, ?)'
       : 'INSERT INTO users (email, password_hash, type) VALUES (?, ?, ?)';
     const args = fullName ? [email, passwordHash, userType, fullName.trim()] : [email, passwordHash, userType];
-    
+
     const result = await client.execute({ sql, args });
-    userId = result.lastInsertRowid;
-    
+
+    // Convert the ID to string safely
+    userId = result.lastInsertRowid; // Assign userId after client.execute
     if (!userId) {
       throw new Error("Registration failed: userId is undefined");
     }
-    
-    // Create basic contract details to store user type (sector)
-    if (selectedUserType === 'trabajador' || selectedUserType === 'despacho' || selectedUserType === 'sindicato') {
-      // Set sector based on user type
-      const sector = selectedUserType === 'trabajador' ? 'trabajador' :
-                    selectedUserType === 'despacho' ? 'despacho' :
-                    'sindicato';
-      
-      try {
-        // Insert minimal contract details with the sector information
-        await client.execute({
-          sql: `INSERT INTO contract_details
-                (user_id, community, province, profession, contract_start_date,
-                contract_type, probation_period, work_schedule_type, sector)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          args: [
-            userId,
-            'Default', // community
-            'Default', // province
-            'Default', // profession
-            new Date().toISOString().split('T')[0], // contract_start_date
-            'Default', // contract_type
-            'No', // probation_period
-            'Completa', // work_schedule_type
-            sector // Store the user type in the sector field
-          ]
-        });
-      } catch (error) {
-        console.error("Error creating contract details:", error);
-        // Continue registration even if contract details fail
-      }
-    }
-    
-    // Use the utility function to set cookies
-    const userIdString = String(userId);
-    setCookies(requestEvent, userIdString, userType);
 
-    // Redirect logic
-    if (userType === 'admin') {
-      requestEvent.redirect(302, '/');
-    } else {
-      requestEvent.redirect(302, '/chat');
-    }
+    // Use the utility function to set cookies
+    // Ensure userId is treated as string/number compatible with setCookies if needed
+    const userIdString = String(userId);
+    setCookies(requestEvent, userIdString, userType); // Use userIdString
+
+    // Redirect after registration
+    requestEvent.redirect(302, '/chat'); // Redirect all new users to the chat
+
     return { success: true };
   } catch (error) { // Correct catch block for useRegister
     console.error('Registration error:', error);
@@ -178,13 +137,11 @@ export const useLogin = routeAction$(async (data, requestEvent) => {
     });
 
     // Get user type from the database
-    const userType = (user.type === 'admin' ? 'admin' :
-                      user.type === 'coordinator' ? 'coordinator' : 'normal') as 'admin' | 'coordinator' | 'normal';
+    const userType = user.type as 'trabajador' | 'despacho' | 'sindicato';
     
     // Use the utility function to set cookies
     setCookies(requestEvent, userIdString, userType);
     
-    // Redirect after login - Admin to home (or future admin panel), others to marketplace
   
        requestEvent.redirect(302, '/chat'); // Redirect normal users to the chat
   

@@ -22,7 +22,7 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           email TEXT UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
-          type TEXT DEFAULT 'normal' CHECK (type IN ('admin', 'coordinator', 'normal')),
+          type TEXT DEFAULT 'trabajador' CHECK (type IN ('trabajador', 'despacho', 'sindicato')),
           name TEXT,
           session_expires TIMESTAMP,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

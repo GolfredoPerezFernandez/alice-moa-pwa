@@ -63,8 +63,8 @@ export default component$(() => {
               </svg>
             </div>
           </div>
-          <h1 class="ml-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
-            Move On Challenge
+          <h1 class="ml-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-500 dark:from-red-400 dark:to-red-300">
+           DAI Off
           </h1>
         </div>
       </div>
@@ -73,7 +73,7 @@ export default component$(() => {
       <div class="max-w-md w-full z-10">
         <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden backdrop-blur-sm p-8 animate-[fade-in_0.5s_ease-out]">
           <div class="text-center mb-8">
-            <h2 class="text-3xl font-bold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
+            <h2 class="text-3xl font-bold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-500 dark:from-red-400 dark:to-red-300">
               Log Out
             </h2>
             <p class="text-gray-600 dark:text-gray-400">
@@ -97,7 +97,7 @@ export default component$(() => {
                 // Set loading state immediately via the component state
                 // This approach avoids trying to modify the read-only isRunning property
               }}
-              class="w-full flex justify-center items-center py-3 px-4 rounded-xl text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 dark:from-blue-500 dark:to-indigo-500 dark:hover:from-blue-600 dark:hover:to-indigo-600 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed"
+              class="w-full flex justify-center items-center py-3 px-4 rounded-xl text-white bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 dark:from-red-500 dark:to-red-400 dark:hover:from-red-600 dark:hover:to-red-500 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <span class="flex items-center">
@@ -122,7 +122,7 @@ export default component$(() => {
             )}
             
             <a
-              href="/marketplace"
+              href="/"
               class="block w-full text-center mt-4 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors duration-200"
             >
               Cancel
@@ -132,7 +132,7 @@ export default component$(() => {
 
         {/* Footer */}
         <div class="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-          Thank you for using Move On Challenge
+          Thank you for using DAI Off
         </div>
       </div>
 

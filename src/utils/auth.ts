@@ -99,7 +99,7 @@ export async function verifyPassword(
 export const setCookies = (
   requestEvent: RequestEventBase,
   userId: string | number | bigint,
-  userType: 'admin' | 'coordinator' | 'normal'
+  userType: 'trabajador' | 'despacho' | 'sindicato'
 ) => {
   const userIdStr = String(userId);
   
@@ -146,19 +146,21 @@ export const getUserId = (requestEvent: RequestEventBase): string | null => {
   return user_id || null;
 };
 
-export const getUserType = (requestEvent: RequestEventBase): 'admin' | 'coordinator' | 'normal' => {
+export const getUserType = (requestEvent: RequestEventBase): 'trabajador' | 'despacho' | 'sindicato' => {
   const user_type = requestEvent.cookie.get('user_type')?.value;
-  if (user_type === 'admin') return 'admin';
-  if (user_type === 'coordinator') return 'coordinator';
-  return 'normal';
+  if (user_type === 'trabajador' || user_type === 'despacho' || user_type === 'sindicato') return user_type as 'trabajador' | 'despacho' | 'sindicato';
+  // Default to 'trabajador' if the type is not recognized or missing
+  return 'trabajador';
 };
 
 export const isAdmin = (requestEvent: RequestEventBase): boolean => {
-  return getUserType(requestEvent) === 'admin';
+  const userType = getUserType(requestEvent);
+  return userType === 'sindicato';
 };
 
 export const isCoordinator = (requestEvent: RequestEventBase): boolean => {
-  return getUserType(requestEvent) === 'coordinator';
+  const userType = getUserType(requestEvent);
+  return userType === 'despacho';
 };
 
 // Verifica si el usuario es de tipo "sindicado"
@@ -169,10 +171,11 @@ export const isSindicado = async (requestEvent: RequestEventBase): Promise<boole
     
     const client = tursoClient(requestEvent);
     const result = await client.execute({
-      sql: 'SELECT sector FROM contract_details WHERE user_id = ? AND sector LIKE ?',
-      args: [user_id, '%sindicato%']
+      sql: 'SELECT sector FROM contract_details WHERE user_id = ? AND sector = ?',
+      args: [user_id, 'sindicato']
     });
     
+    console.log(`[AUTH] Checking sindicado status for user ${user_id}: ${result.rows.length > 0}`);
     return result.rows.length > 0;
   } catch (error) {
     console.error('[AUTH] Error checking sindicado status:', error);
@@ -188,10 +191,11 @@ export const isDespacho = async (requestEvent: RequestEventBase): Promise<boolea
     
     const client = tursoClient(requestEvent);
     const result = await client.execute({
-      sql: 'SELECT sector FROM contract_details WHERE user_id = ? AND sector LIKE ?',
-      args: [user_id, '%despacho%']
+      sql: 'SELECT sector FROM contract_details WHERE user_id = ? AND sector = ?',
+      args: [user_id, 'despacho']
     });
     
+    console.log(`[AUTH] Checking despacho status for user ${user_id}: ${result.rows.length > 0}`);
     return result.rows.length > 0;
   } catch (error) {
     console.error('[AUTH] Error checking despacho status:', error);
@@ -222,9 +226,9 @@ export const verifyAuth = async (requestEvent: RequestEventBase): Promise<boolea
   }
   
   // Get user type from cookie
-  const user_type = requestEvent.cookie.get('user_type')?.value as 'admin' | 'coordinator' | 'normal';
+  const user_type = requestEvent.cookie.get('user_type')?.value as 'trabajador' | 'despacho' | 'sindicato';
   if (!user_type) {
-    console.log('[AUTH] No user_type found, using default normal');
+    console.log('[AUTH] No user_type found, using default trabajador');
   }
   
   // Session refresh mechanism - extend session on each verification
@@ -241,7 +245,7 @@ export const verifyAuth = async (requestEvent: RequestEventBase): Promise<boolea
   });
   
   // Refresh user type cookie
-  requestEvent.cookie.set('user_type', user_type || 'normal', {
+  requestEvent.cookie.set('user_type', user_type || 'trabajador', {
     path: '/',
     httpOnly: true,
     sameSite: 'lax',
