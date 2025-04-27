@@ -279,6 +279,23 @@ export default component$(() => {
                     </div>
                   </Link>
                 )}
+                
+                {/* Link to Auditoría - Only for sindicato/despacho users */}
+                {(auth.value?.isSindicado || auth.value?.isDespacho) && (
+                  <Link
+                    href="/auditoria"
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/auditoria')
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuFileText class="w-5 h-5 mr-1.5" />
+                      <span>Auditoría</span>
+                    </div>
+                  </Link>
+                )}
               </div>
             </div>
             
@@ -530,6 +547,24 @@ export default component$(() => {
                 <div class="flex items-center">
                   <LuFileText class="w-5 h-5 mr-3" />
                   <span>Documentos Legales</span>
+                </div>
+              </Link>
+            )}
+            
+            {/* Link to Auditoría - Only for sindicato/despacho users */}
+            {(auth.value?.isSindicado || auth.value?.isDespacho) && (
+              <Link
+                href="/auditoria"
+                class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive('/auditoria')
+                    ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
+                onClick$={() => (isMobileMenuOpen.value = false)}
+              >
+                <div class="flex items-center">
+                  <LuFileText class="w-5 h-5 mr-3" />
+                  <span>Auditoría</span>
                 </div>
               </Link>
             )}

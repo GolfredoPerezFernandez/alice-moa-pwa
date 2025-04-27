@@ -12,11 +12,11 @@ export const useAuthCheck = routeLoader$(async (requestEvent) => {
   }
   
   // Obtener el tipo de usuario
-  const userType = getUserType(requestEvent);
+  const userType = await getUserType(requestEvent);
   
-  // Verificar si el usuario es de tipo 'normal' (trabajador)
-  if (userType !== 'normal') {
-    // Redireccionar a la página principal si no es trabajador
+  // Permitir acceso a usuarios trabajador o sindicato
+  if (userType !== 'trabajador' && userType !== 'sindicato') {
+    // Redireccionar a la página principal si no tiene permisos
     console.log(`[Timesheet] Access denied: User type ${userType} is not allowed.`);
     throw requestEvent.redirect(302, '/');
   }

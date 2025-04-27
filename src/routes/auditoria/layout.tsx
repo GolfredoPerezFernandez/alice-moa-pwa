@@ -2,19 +2,19 @@ import { component$, Slot } from '@builder.io/qwik';
 import { routeLoader$, type RequestHandler } from '@builder.io/qwik-city';
 import { getUserType } from '~/utils/auth';
 
-// Redirect handler para verificar que solo usuarios trabajadores (normal) puedan acceder a esta ruta
+// Redirect handler to verify that only despacho or sindicato users can access this route
 export const onRequest: RequestHandler = async (requestEvent) => {
   const userType = await getUserType(requestEvent);
   
-  // Permitir acceso a usuarios trabajador o sindicato
-  if (userType !== 'trabajador' && userType !== 'sindicato') {
-    console.log('[Absences] Access denied - redirecting to home. User type:', userType);
+  // Only allow access to users of type "sindicato" or "despacho"
+  if (userType !== 'sindicato' && userType !== 'despacho') {
+    console.log('[Auditoria] Access denied - redirecting to home. User type:', userType);
     throw requestEvent.redirect(302, '/');
   }
 };
 
-// Loader para obtener información del usuario necesaria para esta sección
-export const useAbsencesUserInfo = routeLoader$(async (requestEvent) => {
+// Loader to get user information needed for this section
+export const useAuditoriaUserInfo = routeLoader$(async (requestEvent) => {
   const userType = await getUserType(requestEvent);
   return {
     userType
@@ -22,16 +22,16 @@ export const useAbsencesUserInfo = routeLoader$(async (requestEvent) => {
 });
 
 export default component$(() => {
-  const userInfo = useAbsencesUserInfo();
+  const userInfo = useAuditoriaUserInfo();
 
   return (
     <div class="space-y-6">
       <header>
         <h1 class="text-2xl font-bold text-gray-800 dark:text-white mb-2">
-          Registro de Ausencias
+          Auditoría de Documentos Legales
         </h1>
         <p class="text-gray-600 dark:text-gray-300">
-          Registra tus días de baja laboral, vacaciones y otras ausencias.
+          Carga y analiza documentos PDF para verificar su validez y obtener información relevante.
         </p>
       </header>
 
