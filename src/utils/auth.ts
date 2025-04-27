@@ -148,8 +148,15 @@ export const getUserId = (requestEvent: RequestEventBase): string | null => {
 
 export const getUserType = (requestEvent: RequestEventBase): 'trabajador' | 'despacho' | 'sindicato' => {
   const user_type = requestEvent.cookie.get('user_type')?.value;
-  if (user_type === 'trabajador' || user_type === 'despacho' || user_type === 'sindicato') return user_type as 'trabajador' | 'despacho' | 'sindicato';
-  // Default to 'trabajador' if the type is not recognized or missing
+  console.log(`[AUTH] Retrieved user type from cookie: ${user_type || 'none'}`);
+  
+  if (user_type === 'trabajador' || user_type === 'despacho' || user_type === 'sindicato') {
+    return user_type as 'trabajador' | 'despacho' | 'sindicato';
+  }
+  
+  // If no valid user type is found, check if we can determine it from the database
+  // For now, default to 'trabajador' if the type is not recognized or missing
+  console.log('[AUTH] User type not found in cookie, defaulting to trabajador');
   return 'trabajador';
 };
 
@@ -226,9 +233,29 @@ export const verifyAuth = async (requestEvent: RequestEventBase): Promise<boolea
   }
   
   // Get user type from cookie
-  const user_type = requestEvent.cookie.get('user_type')?.value as 'trabajador' | 'despacho' | 'sindicato';
-  if (!user_type) {
-    console.log('[AUTH] No user_type found, using default trabajador');
+  let user_type = requestEvent.cookie.get('user_type')?.value as 'trabajador' | 'despacho' | 'sindicato';
+  
+  // If user_type is missing in cookie but we have a valid user_id, try to retrieve it from the database
+  if (!user_type && user_id) {
+    try {
+      console.log('[AUTH] No user_type in cookie, attempting to fetch from database');
+      const client = tursoClient(requestEvent);
+      const result = await client.execute({
+        sql: 'SELECT type FROM users WHERE id = ?',
+        args: [user_id]
+      });
+      
+      if (result.rows.length > 0 && result.rows[0].type) {
+        user_type = result.rows[0].type as 'trabajador' | 'despacho' | 'sindicato';
+        console.log(`[AUTH] Retrieved user_type from database: ${user_type}`);
+      } else {
+        console.log('[AUTH] User type not found in database, using default trabajador');
+        user_type = 'trabajador';
+      }
+    } catch (error) {
+      console.error('[AUTH] Error retrieving user type from database:', error);
+      user_type = 'trabajador';
+    }
   }
   
   // Session refresh mechanism - extend session on each verification
@@ -244,14 +271,20 @@ export const verifyAuth = async (requestEvent: RequestEventBase): Promise<boolea
     maxAge: maxAge,
   });
   
-  // Refresh user type cookie
-  requestEvent.cookie.set('user_type', user_type || 'trabajador', {
-    path: '/',
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: maxAge,
-  });
+  // Refresh user type cookie - ensure we preserve the original type
+  if (user_type) {
+    console.log(`[AUTH] Refreshing user_type cookie with value: ${user_type}`);
+    requestEvent.cookie.set('user_type', user_type, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: maxAge,
+    });
+  } else {
+    console.log('[AUTH] No user_type found, attempting to retrieve from database');
+    // We could attempt to retrieve user type from database here if needed
+  }
   
   // Refresh session active cookie
   requestEvent.cookie.set('session_active', 'true', {
