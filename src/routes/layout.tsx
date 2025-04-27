@@ -19,7 +19,8 @@ import {
   LuUser,          // For user icon/logo
   LuCalendar,      // For absences calendar
   LuClock,         // For timesheet/fichaje
-  LuSchool         // Para sección de capacitación
+  LuSchool,        // Para sección de capacitación
+  LuFileText       // Para documentos legales
 } from '@qwikest/icons/lucide';
 
 // Autenticación y verificación de usuario
@@ -63,6 +64,15 @@ export default component$(() => {
   const isMobileMenuOpen = useSignal(false);
   const isDarkMode = useSignal(false);
   const isLoggingOut = useSignal(false);
+  
+  // Asegurar que isLoggingOut se reinicie cuando cambia el estado de autenticación
+  useVisibleTask$(({ track }) => {
+    track(() => auth.value?.isAuthenticated);
+    // Si el usuario está autenticado, asegurarse de que isLoggingOut esté en false
+    if (auth.value?.isAuthenticated) {
+      isLoggingOut.value = false;
+    }
+  });
   
   // Detectar preferencia de tema oscuro
   useVisibleTask$(({ track }) => {
@@ -252,6 +262,23 @@ export default component$(() => {
                     <div class="flex items-center">
                       <LuGraduationCap class="w-5 h-5 mr-1.5" />
                       <span>Capacitación</span>
+                    </div>
+                  </Link>
+                )}
+                
+                {/* Link to Documentos Legales - Only for sindicato/despacho users */}
+                {(auth.value?.isSindicado || auth.value?.isDespacho) && (
+                  <Link
+                    href="/documentos-legales"
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/documentos-legales')
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuFileText class="w-5 h-5 mr-1.5" />
+                      <span>Documentos Legales</span>
                     </div>
                   </Link>
                 )}
@@ -465,6 +492,24 @@ export default component$(() => {
                 <div class="flex items-center">
                   <LuGraduationCap class="w-5 h-5 mr-3" />
                   <span>Capacitación</span>
+                </div>
+              </Link>
+            )}
+            
+            {/* Link to Documentos Legales - Only for sindicato/despacho users */}
+            {(auth.value?.isSindicado || auth.value?.isDespacho) && (
+              <Link
+                href="/documentos-legales"
+                class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive('/documentos-legales')
+                    ? 'bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
+                onClick$={() => (isMobileMenuOpen.value = false)}
+              >
+                <div class="flex items-center">
+                  <LuFileText class="w-5 h-5 mr-3" />
+                  <span>Documentos Legales</span>
                 </div>
               </Link>
             )}
