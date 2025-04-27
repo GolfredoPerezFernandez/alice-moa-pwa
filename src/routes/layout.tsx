@@ -191,7 +191,7 @@ export default component$(() => {
                 >
                   <div class="flex items-center">
                     <LuUsers class="w-5 h-5 mr-1.5" />
-                    <span>Acerca de</span>
+                    <span>Informacion</span>
                   </div>
                 </Link>
                 
@@ -302,13 +302,7 @@ export default component$(() => {
             {/* Right Side Menu: Dark Mode, User/Auth Controls, Mobile Menu Button */}
             <div class="flex items-center gap-1">
               {/* Dark Mode Toggle */}
-              <button
-                onClick$={toggleDarkMode}
-                class="text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50 p-2 rounded-md"
-                aria-label={isDarkMode.value ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-              >
-                {isDarkMode.value ? <LuSun class="w-5 h-5" /> : <LuMoon class="w-5 h-5" />}
-              </button>
+         
               
               {/* Auth Controls */}
               {auth.value?.isAuthenticated ? (
