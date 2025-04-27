@@ -102,10 +102,30 @@ export const useDocumentoInfo = routeLoader$(async (requestEvent) => {
   }
 });
 
+// Función para convertir el formato markdown básico (** para negrita) a HTML
+const convertMarkdownToHtml = (text: string): string => {
+  if (!text) return '';
+  
+  // Reemplazar ** por etiquetas <strong>
+  let result = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  
+  // Reemplazar * por etiquetas <em>
+  result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  
+  // Puedes agregar más conversiones si es necesario
+  return result;
+};
+
 export default component$(() => {
   const location = useLocation();
   const documentId = location.params.id;
   const documentoInfo = useDocumentoInfo();
+  
+  // Aplicar formato Markdown al contenido
+  const formattedContent = (() => {
+    if (!documentoInfo.value.contenido) return '';
+    return convertMarkdownToHtml(documentoInfo.value.contenido);
+  })();
   
   // Crear una URL de datos para mostrar el contenido HTML del documento
   const createHtmlContent = (title: string, content: string = '') => {
@@ -148,8 +168,8 @@ export default component$(() => {
   
   // Función para generar la URL del documento HTML
   const pdfUrl = (() => {
-    // Usar el contenido almacenado en la base de datos, o un mensaje placeholder si no hay contenido
-    return createHtmlContent(documentoInfo.value.titulo, documentoInfo.value.contenido || '');
+    // Usar el contenido formateado, o un mensaje placeholder si no hay contenido
+    return createHtmlContent(documentoInfo.value.titulo, formattedContent || '');
   })();
   
   // Cargar HTML2PDF dinamicamente al iniciar el componente
@@ -222,7 +242,7 @@ export default component$(() => {
       </head>
       <body>
         <div class="document-content">
-          ${documentoInfo.value.contenido || `
+          ${formattedContent || `
             <h1>${documentoInfo.value.titulo}</h1>
             <p>Este es un documento legal generado por el sistema.</p>
             <p>ID del documento: ${documentId}</p>
@@ -291,23 +311,6 @@ export default component$(() => {
   
   return (
     <div class="pdf-viewer-page">
-      {/* Debug panel */}
-      <div style="background-color: #f0f8ff; padding: 10px; margin-bottom: 15px; border-radius: 5px; border: 1px solid #ccc; font-family: monospace; font-size: 12px;">
-        <h3>DEBUG INFO (PDF Visor)</h3>
-        <p>Document ID: {documentId}</p>
-        <p>Success: {documentoInfo.value.success ? 'Sí' : 'No'}</p>
-        <p>User ID: {documentoInfo.value.userId || 'No disponible'}</p>
-        <p>Origen: {documentoInfo.value.origen || 'No disponible'}</p>
-        <p>Contenido disponible: {documentoInfo.value.contenido ? 'Sí' : 'No'}</p>
-        <p>Longitud del contenido: {documentoInfo.value.contenido?.length || 0} caracteres</p>
-        {documentoInfo.value.contenido && (
-          <details>
-            <summary>Primeros 200 caracteres del contenido</summary>
-            <pre>{documentoInfo.value.contenido.substring(0, 200)}...</pre>
-          </details>
-        )}
-      </div>
-      
       <div class="viewer-header">
         <div class="header-left">
           <Link href="/documentos-legales/mis-documentos/" class="back-link">
