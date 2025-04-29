@@ -4,6 +4,8 @@ import { executeQuery } from '~/utils/turso';
 import { getUserId } from '~/utils/auth';
 import { LuCalendar, LuCheck, LuPlus, LuTrash2 } from '@qwikest/icons/lucide';
 
+import { absencesOperations } from '~/utils/db-operations';
+
 // Cargar las ausencias del usuario actual
 export const useUserAbsences = routeLoader$(async (requestEvent) => {
   const user_id = getUserId(requestEvent);
@@ -11,14 +13,10 @@ export const useUserAbsences = routeLoader$(async (requestEvent) => {
     return { absences: [] };
   }
 
-  const absences = await executeQuery(
-    requestEvent,
-    'SELECT * FROM user_absences WHERE user_id = ? ORDER BY start_date DESC',
-    [user_id]
-  );
+  const absences = await absencesOperations.getUserAbsences(requestEvent, user_id);
 
-  return { 
-    absences: absences.rows 
+  return {
+    absences: absences
   };
 });
 
@@ -30,22 +28,21 @@ export const useRegisterAbsence = routeAction$(async (data, requestEvent) => {
   }
 
   try {
-    await executeQuery(
+    const result = await absencesOperations.registerAbsence(
       requestEvent,
-      `INSERT INTO user_absences (user_id, start_date, end_date, absence_type, description)
-      VALUES (?, ?, ?, ?, ?)`,
-      [user_id, data.start_date, data.end_date, data.absence_type, data.description || '']
+      user_id,
+      data.start_date,
+      data.end_date,
+      data.absence_type,
+      data.description || ''
     );
 
-    return { 
-      success: true, 
-      message: 'Ausencia registrada correctamente' 
-    };
+    return result;
   } catch (error) {
     console.error('Error al registrar ausencia:', error);
-    return { 
-      success: false, 
-      error: 'Error al registrar la ausencia. Inténtalo de nuevo.' 
+    return {
+      success: false,
+      error: 'Error al registrar la ausencia. Inténtalo de nuevo.'
     };
   }
 });
@@ -58,21 +55,18 @@ export const useDeleteAbsence = routeAction$(async (data, requestEvent) => {
   }
 
   try {
-    await executeQuery(
+    const result = await absencesOperations.deleteAbsence(
       requestEvent,
-      'DELETE FROM user_absences WHERE id = ? AND user_id = ?',
-      [data.absence_id, user_id]
+      data.absence_id,
+      user_id
     );
 
-    return { 
-      success: true, 
-      message: 'Ausencia eliminada correctamente' 
-    };
+    return result;
   } catch (error) {
     console.error('Error al eliminar ausencia:', error);
-    return { 
-      success: false, 
-      error: 'Error al eliminar la ausencia. Inténtalo de nuevo.' 
+    return {
+      success: false,
+      error: 'Error al eliminar la ausencia. Inténtalo de nuevo.'
     };
   }
 });

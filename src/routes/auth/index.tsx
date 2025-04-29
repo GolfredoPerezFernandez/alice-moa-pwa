@@ -1,8 +1,8 @@
 import { component$, useSignal } from '@builder.io/qwik';
 import { routeLoader$, routeAction$, Form } from '@builder.io/qwik-city';
 import { hashPassword, verifyPassword, setCookies, clearAuthCookies, getUserId } from '~/utils/auth';
-import { tursoClient } from '~/utils/turso';
 import { initAuthDatabase, checkDatabaseConnection } from '~/utils/init-db';
+import { authOperations } from '~/utils/db-operations';
 import { 
   LuArrowLeft, 
   LuUser, 
@@ -27,77 +27,60 @@ export const useLogout = routeAction$(async (data, requestEvent) => {
 });
 
 export const useCheckEmail = routeAction$(async (data, requestEvent) => {
-  const client = tursoClient(requestEvent);
   const { email } = data as { email: string };
 
   try {
-    const result = await client.execute({
-      sql: 'SELECT id FROM users WHERE email = ?',
-      args: [email]
-    });
-
-    return {
-      success: true,
-      isRegistered: result.rows.length > 0
-    };
-  } catch (error) { // Keep only one catch block
+    // Usar la función de db-operations para verificar el email
+    return await authOperations.checkEmail(requestEvent, email);
+  } catch (error) {
     console.error('Email check error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Failed to check email';
     return {
       success: false,
       error: errorMessage
     };
-  } // End of try...catch for useCheckEmail
+  }
 });
 
 // Removed useSchoolsList and useGradesList as they are no longer needed for TokenEstate
 
 export const useRegister = routeAction$(async (data, requestEvent) => {
-  const client = tursoClient(requestEvent);
   const {
     email,
     password,
-    fullName, // Changed from studentName
-    userType: selectedUserType // Add userType from form
-    // Removed schoolId, gradeId
+    fullName,
+    userType: selectedUserType
   } = data as {
     email: string;
     password: string;
-    fullName?: string; // Added fullName for general user registration
-    userType?: string; // Add userType field
+    fullName?: string;
+    userType?: string;
   };
 
   try {
     const passwordHash = await hashPassword(password);
-    // First registration is admin, others are based on selection or default to normal
-    // Declare variables at the start of the try block
-    let userId: number | bigint | undefined;
     const userType: 'trabajador' | 'despacho' | 'sindicato' = selectedUserType as 'trabajador' | 'despacho' | 'sindicato';
 
-    // Insert user with name if provided
-    const sql = fullName
-      ? 'INSERT INTO users (email, password_hash, type, name) VALUES (?, ?, ?, ?)'
-      : 'INSERT INTO users (email, password_hash, type) VALUES (?, ?, ?)';
-    const args = fullName ? [email, passwordHash, userType, fullName.trim()] : [email, passwordHash, userType];
+    // Usar la función de db-operations para registrar el usuario
+    const result = await authOperations.registerUser(
+      requestEvent,
+      email,
+      passwordHash,
+      userType,
+      fullName
+    );
 
-    const result = await client.execute({ sql, args });
-
-    // Convert the ID to string safely
-    userId = result.lastInsertRowid; // Assign userId after client.execute
-    if (!userId) {
-      throw new Error("Registration failed: userId is undefined");
+    if (!result.success) {
+      return result;
     }
 
-    // Use the utility function to set cookies
-    // Ensure userId is treated as string/number compatible with setCookies if needed
-    const userIdString = String(userId);
-    setCookies(requestEvent, userIdString, userType); // Use userIdString
-
-    // Redirect after registration
-    requestEvent.redirect(302, '/chat'); // Redirect all new users to the chat
+    // Si el registro fue exitoso, establecer cookies y redirigir
+    const userIdString = String(result.userId);
+    setCookies(requestEvent, userIdString, userType);
+    requestEvent.redirect(302, '/chat');
 
     return { success: true };
-  } catch (error) { // Correct catch block for useRegister
+  } catch (error) {
     console.error('Registration error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Registration failed';
     return {
@@ -105,19 +88,20 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
       error: errorMessage
     };
   }
-}); // End of routeAction
+});
 
 export const useLogin = routeAction$(async (data, requestEvent) => {
-  const client = tursoClient(requestEvent);
   const { email, password } = data as { email: string; password: string };
   
   try {
-    const result = await client.execute({
-      sql: 'SELECT * FROM users WHERE email = ?',
-      args: [email]
-    });
+    // Usar la función de db-operations para obtener el usuario por email
+    const result = await authOperations.loginUser(requestEvent, email);
     
-    const user = result.rows[0];
+    if (!result.success) {
+      return result;
+    }
+    
+    const user = result.user;
     if (!user || typeof user.password_hash !== 'string' || !user.id) {
       return { success: false, error: 'Invalid user data' };
     }
@@ -130,20 +114,13 @@ export const useLogin = routeAction$(async (data, requestEvent) => {
     // Convert user.id to string to avoid type issues
     const userIdString = String(user.id);
     
-    // Update session_expires to 24 hours to match cookie duration
-    await client.execute({
-      sql: 'UPDATE users SET session_expires = ? WHERE id = ?',
-      args: [new Date(Date.now() + 24 * 60 * 60 * 1000), userIdString]
-    });
-
     // Get user type from the database
     const userType = user.type as 'trabajador' | 'despacho' | 'sindicato';
     
     // Use the utility function to set cookies
     setCookies(requestEvent, userIdString, userType);
     
-  
-       requestEvent.redirect(302, '/chat'); // Redirect normal users to the chat
+    requestEvent.redirect(302, '/chat');
   
     return { success: true };
   } catch (error) {

@@ -1,7 +1,7 @@
 import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
 import { routeLoader$, Form, routeAction$, Link } from '@builder.io/qwik-city';
-import { tursoClient } from '~/utils/turso';
 import { getUserId } from '~/utils/auth';
+import { timesheetOperations } from '~/utils/db-operations';
 import { LuClock, LuPlay, LuSquare, LuCalendarCheck, LuMapPin, LuClock3, LuAlertTriangle, LuLoader } from '@qwikest/icons/lucide';
 import { TimesheetLocationMap } from '~/components/leaflet-map';
 
@@ -13,33 +13,10 @@ export const useTimesheetLoader = routeLoader$(async (requestEvent) => {
     return { timesheet: [], isCheckedIn: false, currentEntry: null };
   }
 
-  const client = tursoClient(requestEvent);
-  
   try {
-    // Verificar si el usuario tiene una entrada sin salida (está fichado)
-    const currentEntryResult = await client.execute({
-      sql: `SELECT * FROM user_timesheet 
-            WHERE user_id = ? AND check_out_time IS NULL 
-            ORDER BY check_in_time DESC LIMIT 1`,
-      args: [userId]
-    });
-
-    const isCheckedIn = currentEntryResult.rows.length > 0;
-    const currentEntry = isCheckedIn ? currentEntryResult.rows[0] : null;
-
-    // Obtener los últimos 10 registros de fichaje del usuario
-    const historyResult = await client.execute({
-      sql: `SELECT * FROM user_timesheet 
-            WHERE user_id = ? 
-            ORDER BY check_in_time DESC LIMIT 10`,
-      args: [userId]
-    });
-
-    return {
-      timesheet: historyResult.rows,
-      isCheckedIn,
-      currentEntry
-    };
+    // Usar la función de db-operations para obtener los datos del timesheet
+    const timesheetData = await timesheetOperations.getTimesheetData(requestEvent, userId);
+    return timesheetData;
   } catch (error) {
     console.error('[Timesheet Loader] Error:', error);
     return { timesheet: [], isCheckedIn: false, currentEntry: null };
@@ -54,39 +31,13 @@ export const useCheckInAction = routeAction$(async (data, requestEvent) => {
   }
 
   const { latitude, longitude } = data as any;
-  const location = latitude && longitude ? 
+  const location = latitude && longitude ?
     JSON.stringify({ latitude, longitude }) : null;
 
-  const client = tursoClient(requestEvent);
-  
   try {
-    // Verificar si ya existe una entrada sin salida
-    const checkResult = await client.execute({
-      sql: `SELECT id FROM user_timesheet 
-            WHERE user_id = ? AND check_out_time IS NULL`,
-      args: [userId]
-    });
-
-    if (checkResult.rows.length > 0) {
-      return { 
-        success: false, 
-        message: 'Ya tienes una entrada activa. Debes fichar salida primero.' 
-      };
-    }
-
-    // Crear nueva entrada
-    await client.execute({
-      sql: `INSERT INTO user_timesheet 
-            (user_id, check_in_time, check_in_location) 
-            VALUES (?, CURRENT_TIMESTAMP, ?)`,
-      args: [userId, location]
-    });
-
-    return { 
-      success: true, 
-      message: 'Entrada fichada correctamente',
-      timestamp: new Date().toISOString()
-    };
+    // Usar la función de db-operations para hacer check-in
+    const result = await timesheetOperations.checkIn(requestEvent, userId, location);
+    return result;
   } catch (error) {
     console.error('[Check-In Action] Error:', error);
     return { success: false, message: 'Error al fichar entrada' };
@@ -101,52 +52,13 @@ export const useCheckOutAction = routeAction$(async (data, requestEvent) => {
   }
 
   const { latitude, longitude } = data as any;
-  const location = latitude && longitude ? 
+  const location = latitude && longitude ?
     JSON.stringify({ latitude, longitude }) : null;
 
-  const client = tursoClient(requestEvent);
-  
   try {
-    // Buscar la entrada activa
-    const entryResult = await client.execute({
-      sql: `SELECT id, check_in_time FROM user_timesheet 
-            WHERE user_id = ? AND check_out_time IS NULL 
-            ORDER BY check_in_time DESC LIMIT 1`,
-      args: [userId]
-    });
-
-    if (entryResult.rows.length === 0) {
-      return { 
-        success: false, 
-        message: 'No tienes una entrada activa para fichar salida.' 
-      };
-    }
-
-    const entryId = entryResult.rows[0].id;
-    // Convertir explícitamente a string para evitar problemas de tipo
-    const checkInTimeStr = String(entryResult.rows[0].check_in_time);
-    const checkInTime = new Date(checkInTimeStr);
-    const checkOutTime = new Date();
-    
-    // Calcular minutos trabajados
-    const totalMinutes = Math.round((checkOutTime.getTime() - checkInTime.getTime()) / 60000);
-
-    // Actualizar el registro con la salida
-    await client.execute({
-      sql: `UPDATE user_timesheet 
-            SET check_out_time = CURRENT_TIMESTAMP, 
-                check_out_location = ?, 
-                total_minutes = ? 
-            WHERE id = ?`,
-      args: [location, totalMinutes, entryId]
-    });
-
-    return { 
-      success: true, 
-      message: 'Salida fichada correctamente',
-      timestamp: checkOutTime.toISOString(),
-      totalMinutes
-    };
+    // Usar la función de db-operations para hacer check-out
+    const result = await timesheetOperations.checkOut(requestEvent, userId, location);
+    return result;
   } catch (error) {
     console.error('[Check-Out Action] Error:', error);
     return { success: false, message: 'Error al fichar salida' };

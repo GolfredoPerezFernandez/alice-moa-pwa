@@ -1,8 +1,8 @@
 import { component$, useSignal, useVisibleTask$, $, useStore } from "@builder.io/qwik";
 import { routeLoader$, Form, Link } from '@builder.io/qwik-city';
 import { LuFilePlus, LuSearch, LuTag } from '@qwikest/icons/lucide';
-import { tursoClient } from "~/utils/turso";
 import { getUserId } from "~/utils/auth";
+import { capacitacionOperations } from "~/utils/db-operations";
 
 // Definición de tipos para los cursos de capacitación
 interface CursoCapacitacion {
@@ -18,23 +18,8 @@ interface CursoCapacitacion {
 // Cargador de datos para obtener todos los cursos de capacitación
 export const useCursosLoader = routeLoader$(async (requestEvent) => {
   try {
-    const client = tursoClient(requestEvent);
-    const result = await client.execute(`
-      SELECT id, titulo, descripcion, categoria, instructor, duracion, imagen_color
-      FROM cursos_capacitacion
-      ORDER BY fecha_creacion DESC
-    `);
-    
-    // Mapear los resultados al tipo CursoCapacitacion
-    return result.rows.map(row => ({
-      id: Number(row.id),
-      titulo: String(row.titulo),
-      descripcion: String(row.descripcion),
-      categoria: String(row.categoria) as 'seguridad' | 'derechos' | 'prevencion' | 'igualdad' | 'salud',
-      imagen_color: String(row.imagen_color || 'bg-red-100 dark:bg-red-900/20'),
-      instructor: row.instructor ? String(row.instructor) : undefined,
-      duracion: row.duracion ? String(row.duracion) : undefined
-    }));
+    // Usar la función de db-operations para obtener todos los cursos
+    return await capacitacionOperations.getAllCourses(requestEvent);
   } catch (error) {
     console.error('[CAPACITACION] Error al cargar cursos:', error);
     return [] as CursoCapacitacion[];

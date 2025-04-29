@@ -1,35 +1,6 @@
 import { component$ } from '@builder.io/qwik';
 import { Link } from '@builder.io/qwik-city';
-import { useAuthCheck } from './layout';
 import { LuMessageSquare, LuFileText, LuFileSignature, LuClipboardEdit } from '@qwikest/icons/lucide';
-
-// Categorías para usuario tipo Despacho
-const categoriasDespacho = [
-  {
-    id: 'contratos-laborales',
-    title: 'Contratos Laborales',
-    description: 'Plantillas para diferentes tipos de contratos laborales',
-    icon: LuFileSignature
-  },
-  {
-    id: 'despidos',
-    title: 'Cartas de Despido',
-    description: 'Documentos relacionados con la terminación de relaciones laborales',
-    icon: LuFileText
-  },
-  {
-    id: 'demandas',
-    title: 'Demandas Laborales',
-    description: 'Documentos para procesos judiciales laborales',
-    icon: LuClipboardEdit
-  },
-  {
-    id: 'reclamaciones',
-    title: 'Reclamaciones',
-    description: 'Documentos para reclamar derechos laborales e indemnizaciones',
-    icon: LuFileText
-  }
-];
 
 // Categorías para usuario tipo Sindicato
 const categoriasSindicato = [
@@ -60,10 +31,8 @@ const categoriasSindicato = [
 ];
 
 export default component$(() => {
-  const authCheck = useAuthCheck();
   
   // Determinar qué categorías mostrar según el tipo de usuario
-  const categorias = authCheck.value.isDespacho ? categoriasDespacho : categoriasSindicato;
   
   return (
     <div class="documentos-page">
@@ -91,36 +60,6 @@ export default component$(() => {
           </div>
         </div>
         
-        <div class="option-card templates">
-          <div class="option-icon">
-            <LuFileText class="w-12 h-12 text-white" />
-          </div>
-          <div class="option-content">
-            <h2 class="option-title">Plantillas Prediseñadas</h2>
-            <p class="option-description">
-              Utiliza nuestras plantillas prediseñadas para generar documentos rápidamente.
-              Solo completa los campos requeridos y obtén tu documento al instante.
-            </p>
-            <div class="categories-container">
-              <h3 class="categories-title">Elige una categoría:</h3>
-              <div class="categories-grid">
-                {categorias.map((categoria) => (
-                  <Link 
-                    key={categoria.id}
-                    href={`/documentos-legales/generar/${categoria.id}/`}
-                    class="category-card"
-                  >
-                    <categoria.icon class="w-6 h-6 category-icon" />
-                    <div class="category-info">
-                      <h4 class="category-title">{categoria.title}</h4>
-                      <p class="category-description">{categoria.description}</p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
         
         <div class="documents-history">
           <h2 class="history-title">Mis Documentos Recientes</h2>
