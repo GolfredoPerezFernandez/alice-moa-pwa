@@ -13,10 +13,10 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
   
   try {
     // Use a hardcoded schema to avoid file system issues
-    console.log('[DB-INIT] Using hardcoded auth schema');
+    console.log('[DB-INIT] Using hardcoded and file-based schemas');
     
-    // Define the auth schema directly in the code
-    const schemaSql = `
+    // Define the base schema directly in the code
+    let schemaSql = `
       -- Users Table for Authentication
       CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,14 +161,31 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
       CREATE INDEX IF NOT EXISTS idx_progreso_usuario ON progreso_curso(usuario_id);
       CREATE INDEX IF NOT EXISTS idx_progreso_modulo ON progreso_curso(modulo_id);
     `;
+
+    // Read and append the scraper schema
+    try {
+      const scraperSchemaPath = path.join(process.cwd(), 'db', 'scraper-schema.sql');
+      const scraperSchemaSql = fs.readFileSync(scraperSchemaPath, 'utf-8');
+      schemaSql += `\n\n${scraperSchemaSql}`;
+      console.log('[DB-INIT] Successfully read and appended scraper-schema.sql');
+    } catch (fileError) {
+      console.error('[DB-INIT] Error reading scraper-schema.sql:', fileError);
+      // Decide if this should be a fatal error or if initialization can continue
+      // For now, let's make it fatal to ensure all schemas are applied
+      return {
+        success: false,
+        message: `Failed to read scraper-schema.sql: ${fileError instanceof Error ? fileError.message : String(fileError)}`
+      };
+    }
     
     // Split the SQL into separate statements and execute them
     const statements = schemaSql
       .split(';')
       .map(stmt => stmt.trim())
-      .filter(stmt => stmt.length > 0);
+      // Filter out empty statements and statements that are only comments
+      .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
     
-    console.log(`[DB-INIT] Executing ${statements.length} SQL statements`);
+    console.log(`[DB-INIT] Executing ${statements.length} filtered SQL statements`);
     
     for (const stmt of statements) {
       await client.execute(stmt);
@@ -184,11 +201,17 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
       "SELECT name FROM sqlite_master WHERE type='table' AND name='cursos_capacitacion'",
       "SELECT name FROM sqlite_master WHERE type='table' AND name='modulos_curso'",
       "SELECT name FROM sqlite_master WHERE type='table' AND name='recursos_curso'",
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='progreso_curso'"
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='progreso_curso'",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='legalDocument'" // Verify legalDocument table
     ], 'read');
     
     // Check if all results have rows indicating the tables exist
     const allTablesExist = tablesResult.every(result => result.rows.length > 0);
+
+    if (tablesResult.length < 9) { // Expected 8 original + 1 new = 9
+        console.error('[DB-INIT] Verification failed: Not all table checks were processed. Expected 9, got ' + tablesResult.length);
+        // This indicates an issue with the batch execution or the queries themselves.
+    }
     
     if (!allTablesExist) {
       console.error('[DB-INIT] Verification failed: one or more required tables not found.');
@@ -201,7 +224,7 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
     console.log('[DB-INIT] Database initialized successfully');
     return {
       success: true,
-      message: 'Authentication database initialized successfully'
+      message: 'Database tables initialized successfully (including scraper schema)'
     };
   } catch (error) {
     console.error('[DB-INIT] Error initializing database:', error);

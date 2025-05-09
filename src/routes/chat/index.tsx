@@ -1,7 +1,10 @@
 import { component$, useSignal, useStore, useStylesScoped$, useVisibleTask$, $, QRL, Slot, noSerialize } from '@builder.io/qwik';
 import { routeLoader$, server$, Form, routeAction$, zod$, z } from '@builder.io/qwik-city';
-import { ChatOpenAI } from "@langchain/openai";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { SystemMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
+import { PineconeStore } from "@langchain/pinecone";
+import { Pinecone as PineconeClient } from "@pinecone-database/pinecone";
+import type { Document } from "@langchain/core/documents";
 // Import flag SVGs for each country
 import US from 'country-flag-icons/string/3x2/US';
 import ES from 'country-flag-icons/string/3x2/ES';
@@ -329,41 +332,86 @@ const serverFetchLangChainResponse = server$(async function(
 ) {
     console.log("Server: Fetching LangChain response for thread:", threadId);
     const openAIApiKey = this.env.get('OPENAI_API_KEY') || import.meta.env.OPENAI_API_KEY;
-    
+    const pineconeApiKey = this.env.get('PINECONE_API_KEY') || import.meta.env.PINECONE_API_KEY;
+    const pineconeIndexName = this.env.get('PINECONE_INDEX') || import.meta.env.PINECONE_INDEX;
+    const pineconeEnvironment = this.env.get('PINECONE_ENVIRONMENT') || import.meta.env.PINECONE_ENVIRONMENT;
+
     if (!openAIApiKey) {
         console.error("OpenAI API Key not configured on server.");
         return "Error: AI service not configured.";
     }
+    if (!pineconeApiKey || !pineconeIndexName || !pineconeEnvironment) {
+         console.error("Pinecone environment variables not configured on server.");
+         return "Error: Vector database service not configured.";
+    }
 
     try {
+        // Initialize Pinecone and Embeddings
+        const embeddings = new OpenAIEmbeddings({
+            openAIApiKey: openAIApiKey,
+            model: "text-embedding-3-small", // Ensure this matches your Pinecone index dimension
+        });
+
+        const pinecone = new PineconeClient({
+             apiKey: pineconeApiKey,
+             environment: pineconeEnvironment,
+        });
+
+        const pineconeIndex = pinecone.Index(pineconeIndexName);
+
+        const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
+            pineconeIndex,
+            // Optional: specify namespace if used
+            // namespace: "your-namespace",
+        });
+
+        // Perform similarity search
+        console.log(`Server: Performing similarity search for "${userMessage}"`);
+        const relevantDocs = await vectorStore.similaritySearch(userMessage, 4); // Get top 4 relevant documents
+
+        console.log(`Server: Found ${relevantDocs.length} relevant documents.`);
+        // console.log("Relevant Docs:", relevantDocs); // Log relevant docs for debugging
+
+        // Construct the prompt with retrieved context
+        const context = relevantDocs.map(doc => doc.pageContent).join("\n\n");
+
+        const systemContent = `You are a helpful assistant for DAI OFF, a legal labor advisory service. Answer all questions to the best of your ability about labor rights, legislation, and legal matters in ${language}. Use the following context to answer the user's question. If you don't know the answer based on the context, say that you don't know.
+
+Context:
+${context}
+`;
+
         const llm = new ChatOpenAI({
             openAIApiKey: openAIApiKey,
             model: "gpt-4o-mini",
             temperature: 0
         });
 
-        const systemContent = `You are a helpful assistant for DAI OFF, a legal labor advisory service. Answer all questions to the best of your ability about labor rights, legislation, and legal matters in ${language}.`;
-        
         // Add system message if not already present in history
         const hasSystemMessage = chatHistory.some(msg => msg.role === 'system');
         let processedHistory = [...chatHistory];
-        
-        if (!hasSystemMessage) {
+
+        // Replace or add the system message with the new context
+        if (hasSystemMessage) {
+            processedHistory = processedHistory.map(msg =>
+                msg.role === 'system' ? { ...msg, content: systemContent } : msg
+            );
+        } else {
             processedHistory.unshift({
                 role: 'system',
                 content: systemContent
             });
         }
-        
+
         // Add current user message
         processedHistory.push({
             role: 'user',
             content: userMessage
         });
-        
+
         // Trim history to avoid token limit issues
         const trimmedHistory = trimChatHistory(processedHistory);
-        
+
         // Convert to LangChain message format
         const messages = trimmedHistory.map(msg => {
             if (msg.role === 'system') return new SystemMessage(msg.content);
@@ -377,7 +425,7 @@ const serverFetchLangChainResponse = server$(async function(
         return response.content as string;
 
     } catch (error: any) {
-        console.error("Server: Error in LangChain model:", error);
+        console.error("Server: Error in LangChain model or Pinecone:", error);
         return "I'm sorry, I encountered an error processing your request.";
     }
 });
