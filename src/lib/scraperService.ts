@@ -13,7 +13,7 @@ const llm = new ChatOpenAI({
 });
 
 const TARGET_URL = 'https://www.iberley.es/';
-const MAX_PAGES_TO_VISIT = 50;
+// const MAX_PAGES_TO_VISIT = 50; // User requested effectively unlimited crawl within TARGET_URL
 
 interface ScrapedDocument {
   title: string;
@@ -24,12 +24,12 @@ interface ScrapedDocument {
 }
 
 const documentExtractionSchema = z.object({
-  isRelevantDocument: z.boolean().describe("Is the primary focus of the text a single Spanish legal document (ley or sentencia) from Iberley? Ignore lists, navigation, ads, general articles."),
-  documentType: z.enum(["sentencia", "ley", "none"]).describe("The type of the document ('sentencia' or 'ley'), or 'none' if not a relevant legal document."),
-  title: z.string().optional().describe("The full, specific title of the legal document, if relevant."),
-  fullContent: z.string().optional().describe("The complete text content of the specific legal document, if relevant and available in the input text. Extract only the document text itself, excluding surrounding website elements."),
-  publicationDate: z.string().optional().describe("The publication date found in the text (e.g., 'DD/MM/YYYY', 'DD de Month de YYYY'), if relevant."),
-}).describe("Extracted information about a potential legal document from the provided text.");
+  isRelevantDocument: z.boolean().describe("Is the primary focus of the text a single Spanish legal document (ley or sentencia) OR a distinct, self-contained article/section of such a document from Iberley? Ignore lists, navigation, ads, general articles not part of the core document/article text."),
+  documentType: z.enum(["sentencia", "ley", "none"]).describe("The type of the document or article ('sentencia' or 'ley'), or 'none' if not a relevant legal document/article."),
+  title: z.string().nullable().describe("The full, specific title of the legal document or article, if relevant. Return null if not applicable."),
+  fullContent: z.string().nullable().describe("The complete text content of the specific legal document or article, if relevant and available in the input text. Extract only the document/article text itself, excluding surrounding website elements. Return null if not applicable."),
+  publicationDate: z.string().nullable().describe("The publication date associated with the document or article (e.g., 'DD/MM/YYYY', 'DD de Month de YYYY'), if relevant. Return null if not applicable."),
+}).describe("Extracted information about a potential legal document or a distinct article/section of a legal document from the provided text.");
 
 const extractionLlm = llm.withStructuredOutput(documentExtractionSchema, { name: "documentExtractor" });
 
@@ -56,11 +56,28 @@ async function fetchPageContent(url: string): Promise<string> {
 
 function extractTextFromHtml(htmlContent: string): string {
     const $ = cheerio.load(htmlContent);
-    let mainContent = $('main').text() || $('article').text() || $('.main-content').text() || $('.entry-content').text();
+    
+    // Prioritize the specific content container for Iberley document/article detail pages
+    let mainContent = $('div.html-content[itemprop="text"]').text();
+    let extractionMethod = "specific 'div.html-content[itemprop=\"text\"]'";
+
     if (!mainContent || mainContent.trim().length < 200) {
-        $('script, style, nav, header, footer, .sidebar, .menu, .ads').remove();
+        // Fallback to common semantic tags if the specific one fails or content is too short
+        extractionMethod = "common semantic tags (main, article, .main-content, .entry-content)";
+        console.log(`[extractTextFromHtml] Specific selector yielded short/no content. Trying: ${extractionMethod}`);
+        mainContent = $('main').text() || $('article').text() || $('.main-content').text() || $('.entry-content').text();
+    }
+
+    if (!mainContent || mainContent.trim().length < 200) {
+        // Further fallback: remove noise and take body text
+        extractionMethod = "cleaned body text";
+        console.log(`[extractTextFromHtml] Common selectors also yielded short/no content. Trying: ${extractionMethod}`);
+        // Remove common noise elements, including Quasar layout components
+        $('script, style, nav, header, footer, .sidebar, .menu, .ads, .q-header, .q-footer, .q-drawer, .q-page-sticky, #a2a_menu, #a2a_overlay, #a2a_modal, #q-loading-bar, #q-notify').remove();
         mainContent = $('body').text();
     }
+    
+    console.log(`[extractTextFromHtml] Extracted text using method: ${extractionMethod}. Length: ${mainContent.trim().length}`);
     return mainContent.replace(/\s\s+/g, ' ').trim();
 }
 
@@ -74,7 +91,13 @@ async function analyzeAndExtractWithAgent(textContent: string, sourceUrl: string
   const textToSend = textContent.substring(0, MAX_CHARS_FOR_LLM);
 
   try {
-    const systemPrompt = `You are an expert legal document analyzer specializing in Spanish law from the website iberley.es. Your task is to determine if the provided text primarily represents a single specific legal document (a 'sentencia' - judgment/sentence, or a 'ley' - law/decree/normative). Ignore lists of documents, navigation elements, advertisements, general articles, or blog posts. If it is a relevant document, extract its key information accurately. Focus ONLY on the main legal document presented.`;
+    const systemPrompt = `You are an expert legal document analyzer specializing in Spanish law from the website iberley.es.
+Your task is to determine if the provided text primarily represents EITHER:
+1. A single specific legal document (a 'sentencia' - judgment/sentence, or a 'ley' - law/decree/normative).
+2. A distinct, self-contained article or section of such a legal document.
+Ignore lists of multiple documents, navigation elements, advertisements, general articles, or blog posts that are not the core text of the law/sentence/article itself.
+If the text represents a relevant single document OR a distinct article/section, extract its key information accurately. Focus ONLY on the main legal document or article text presented.
+If the text is a list page or other non-document/non-article content, set isRelevantDocument to false.`;
     const result = await extractionLlm.invoke([
         new SystemMessage(systemPrompt),
         new HumanMessage(`Analyze the following text extracted from ${sourceUrl} and provide the structured information:\n\n\`\`\`text\n${textToSend}\n\`\`\``)
@@ -119,34 +142,75 @@ async function analyzeAndExtractWithAgent(textContent: string, sourceUrl: string
 function extractLinks(htmlContent: string, sourceUrl: string): string[] {
     const $ = cheerio.load(htmlContent);
     const newLinks: string[] = [];
-    const linkKeywords = ["ley", "sentencia", "legislacion", "jurisprudencia", "normativa", "actualidad", "noticias", "boletin", "codigo", "resoluciones", "temas"];
-    const paginationKeywords = ["siguiente", "next", "anterior", "prev", "page", "página"];
+    let anchors: cheerio.Cheerio<DomHandlerElement>;
+    let selectorStrategy = "general 'a[href]'"; // Default description
 
-    $('a[href]').each((i: number, el: DomHandlerElement) => { // Use DomHandlerElement
+    if (sourceUrl.startsWith(TARGET_URL + "jurisprudencia")) {
+        selectorStrategy = "specific for /jurisprudencia: 'div.sentence-home-card a.news-title[href]'";
+        console.log(`[extractLinks] Using ${selectorStrategy} for page: ${sourceUrl}`);
+        anchors = $('div.sentence-home-card a.news-title[href]');
+        if (anchors.length === 0) {
+            console.log(`[extractLinks] Specific selector for jurisprudencia found 0 links, falling back to general 'a[href]'`);
+            selectorStrategy = "general 'a[href]' (fallback for /jurisprudencia)";
+            anchors = $('a[href]');
+        }
+    } else if (sourceUrl.startsWith(TARGET_URL + "legislacion")) {
+        // Speculative selectors for /legislacion. May need refinement based on its actual HTML structure.
+        selectorStrategy = "speculative for /legislacion: 'div[class*=\"card\"] h2 a[href], div[class*=\"item\"] h2 a[href], article h2 a[href], div[class*=\"card\"] a[class*=\"title\"], div[class*=\"item\"] a[class*=\"title\"], article a[class*=\"title\"]'";
+        console.log(`[extractLinks] Using ${selectorStrategy} for page: ${sourceUrl}`);
+        anchors = $('div[class*="card"] h2 a[href], div[class*="item"] h2 a[href], article h2 a[href], div[class*="card"] a[class*="title"], div[class*="item"] a[class*="title"], article a[class*="title"]');
+        if (anchors.length === 0) {
+            console.log(`[extractLinks] Specific selector for legislacion found 0 links, falling back to general 'a[href]'`);
+            selectorStrategy = "general 'a[href]' (fallback for /legislacion)";
+            anchors = $('a[href]');
+        }
+    } else {
+        anchors = $('a[href]');
+    }
+
+    anchors.each((i: number, el: DomHandlerElement) => {
         const href = $(el).attr('href');
-        const linkText = $(el).text().toLowerCase();
-        if (href) {
-            try {
-                const absoluteUrl = new URL(href, sourceUrl).toString();
-                if (absoluteUrl.startsWith(TARGET_URL) &&
-                    !absoluteUrl.startsWith('mailto:') &&
-                    !absoluteUrl.startsWith('javascript:') &&
-                    !absoluteUrl.includes('/auth/') &&
-                    !absoluteUrl.includes('/carrito') &&
-                    !absoluteUrl.includes('/suscripcion') &&
-                    !absoluteUrl.endsWith('.pdf') && !absoluteUrl.endsWith('.zip') &&
-                    !absoluteUrl.endsWith('.jpg') && !absoluteUrl.endsWith('.png'))
-                {
-                    const isRelevant = linkKeywords.some(kw => linkText.includes(kw) || absoluteUrl.toLowerCase().includes(kw)) ||
-                                     paginationKeywords.some(kw => linkText.includes(kw) || absoluteUrl.toLowerCase().includes(kw));
-                    if (isRelevant) {
-                        newLinks.push(absoluteUrl);
-                    }
-                }
-            } catch (error) { /* ignore invalid URLs */ }
+
+        if (!href || href.trim() === '' || href.startsWith('#') || href.toLowerCase().startsWith('javascript:')) {
+            return;
+        }
+        
+        try {
+            const absoluteUrl = new URL(href, sourceUrl).toString();
+
+            if (!absoluteUrl.startsWith(TARGET_URL) ||
+                absoluteUrl.startsWith('mailto:') ||
+                absoluteUrl.toLowerCase().includes('/auth/') ||
+                absoluteUrl.toLowerCase().includes('/carrito/') ||
+                absoluteUrl.toLowerCase().includes('/suscripcion/') ||
+                absoluteUrl.toLowerCase().includes('/login') ||
+                absoluteUrl.toLowerCase().includes('/registro') ||
+                absoluteUrl.toLowerCase().includes('/perfil') ||
+                absoluteUrl.toLowerCase().includes('/mi-cuenta') ||
+                absoluteUrl.endsWith('.pdf') ||
+                absoluteUrl.endsWith('.zip') ||
+                absoluteUrl.endsWith('.doc') || absoluteUrl.endsWith('.docx') ||
+                absoluteUrl.endsWith('.xls') || absoluteUrl.endsWith('.xlsx') ||
+                absoluteUrl.endsWith('.ppt') || absoluteUrl.endsWith('.pptx') ||
+                absoluteUrl.endsWith('.jpg') || absoluteUrl.endsWith('.jpeg') ||
+                absoluteUrl.endsWith('.png') || absoluteUrl.endsWith('.gif') ||
+                absoluteUrl.endsWith('.svg') || absoluteUrl.endsWith('.webp') ||
+                absoluteUrl.endsWith('.mp3') || absoluteUrl.endsWith('.mp4') ||
+                absoluteUrl.endsWith('.xml') || absoluteUrl.endsWith('.rss') ||
+                absoluteUrl.endsWith('.css') || absoluteUrl.endsWith('.js')
+            ) {
+                return;
+            }
+            
+            newLinks.push(absoluteUrl);
+
+        } catch (error) {
+            console.warn(`[extractLinks] Skipping invalid URL: "${href}" on page ${sourceUrl} (selector strategy: ${selectorStrategy}) due to error: ${error instanceof Error ? error.message : String(error)}`);
         }
     });
-    return [...new Set(newLinks)];
+    const uniqueNewLinks = [...new Set(newLinks)];
+    console.log(`[extractLinks] Found ${uniqueNewLinks.length} new unique links on ${sourceUrl} (using selector strategy: ${selectorStrategy})`);
+    return uniqueNewLinks;
 }
 
 async function saveDocuments(
@@ -243,12 +307,15 @@ export async function runScraper(requestEvent: RequestEventBase): Promise<{
   const visitedUrls: Set<string> = new Set();
 
   try {
-    while (urlQueue.length > 0 && visitedUrls.size < MAX_PAGES_TO_VISIT) {
+    // Loop continues as long as there are URLs in the queue.
+    // The visitedUrls set prevents re-visiting and infinite loops on already seen pages.
+    // The extractLinks function ensures we only add URLs from TARGET_URL.
+    while (urlQueue.length > 0) {
       const currentUrl = urlQueue.shift();
       if (!currentUrl || visitedUrls.has(currentUrl)) {
         continue;
       }
-      console.log(`Visiting: ${currentUrl} (${visitedUrls.size + 1}/${MAX_PAGES_TO_VISIT})`);
+      console.log(`Visiting: ${currentUrl} (Visited: ${visitedUrls.size + 1})`);
       visitedUrls.add(currentUrl);
       stats.totalPagesVisited++;
 
@@ -266,7 +333,20 @@ export async function runScraper(requestEvent: RequestEventBase): Promise<{
           const newLinks = extractLinks(htmlContent, currentUrl);
           newLinks.forEach(link => {
             if (!visitedUrls.has(link) && !urlQueue.includes(link)) {
-              urlQueue.push(link);
+              // Heuristic to prioritize likely detail page URLs from jurisprudencia or legislacion
+              const isLikelyJurisprudenciaDetail = link.startsWith(TARGET_URL + "jurisprudencia/") &&
+                                                 link.length > (TARGET_URL + "jurisprudencia/").length &&
+                                                 !link.endsWith("/jurisprudencia") && !link.includes("?"); // Avoid query params which might be filters
+              const isLikelyLegislacionDetail = link.startsWith(TARGET_URL + "legislacion/") &&
+                                              link.length > (TARGET_URL + "legislacion/").length &&
+                                              !link.endsWith("/legislacion") && !link.includes("?"); // Avoid query params
+
+              if (isLikelyJurisprudenciaDetail || isLikelyLegislacionDetail) {
+                urlQueue.unshift(link); // Add to FRONT of the queue
+                console.log(`[runScraper] PRIORITIZED link added to front of queue: ${link}`);
+              } else {
+                urlQueue.push(link); // Add to END of the queue
+              }
             }
           });
           stats.totalLinksDiscovered += newLinks.length;
@@ -275,10 +355,9 @@ export async function runScraper(requestEvent: RequestEventBase): Promise<{
         console.error(`Error processing page ${currentUrl}:`, pageError);
       }
     }
-    if (visitedUrls.size >= MAX_PAGES_TO_VISIT) {
-      console.warn(`Scraper reached MAX_PAGES_TO_VISIT limit (${MAX_PAGES_TO_VISIT}).`);
-    }
-    console.log(`Scraper run finished. Visited ${visitedUrls.size} pages. Found ${stats.totalDocumentsFound} relevant documents. Created: ${stats.totalCreated}, Updated: ${stats.totalUpdated}. Discovered ${stats.totalLinksDiscovered} links.`);
+    // Warning for MAX_PAGES_TO_VISIT is no longer applicable.
+    // The scraper stops when the urlQueue is exhausted.
+    console.log(`Scraper run finished. Visited ${visitedUrls.size} unique pages within ${TARGET_URL}. Found ${stats.totalDocumentsFound} relevant documents. Created: ${stats.totalCreated}, Updated: ${stats.totalUpdated}. Discovered ${stats.totalLinksDiscovered} links.`);
     return stats;
   } catch (error) {
     console.error("Scraper run failed globally:", error);
