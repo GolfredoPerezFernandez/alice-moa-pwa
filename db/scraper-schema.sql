@@ -3,8 +3,9 @@ CREATE TABLE IF NOT EXISTS legalDocument (
     url TEXT UNIQUE NOT NULL,
     title TEXT NOT NULL,
     content TEXT NOT NULL,
-    documentType TEXT NOT NULL,
+    documentType TEXT NOT NULL, -- "sentencia", "ley", "convenio"
     publicationDate TEXT, -- Store as ISO8601 string (YYYY-MM-DD HH:MM:SS.SSS) or (YYYY-MM-DD)
+    pdfUrl TEXT, -- URL of the downloaded PDF
     createdAt TEXT NOT NULL, -- Store as ISO8601 string
     updatedAt TEXT NOT NULL -- Store as ISO8601 string
 );

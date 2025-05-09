@@ -783,10 +783,10 @@
     "@jridgewell/resolve-uri" "^3.0.3"
     "@jridgewell/sourcemap-codec" "^1.4.10"
 
-"@langchain/community@^0.3.41":
-  version "0.3.41"
-  resolved "https://registry.yarnpkg.com/@langchain/community/-/community-0.3.41.tgz#8a7cc5dd206b804718e9543ff9541edeef6b6de4"
-  integrity sha512-i/DQ4bkKW+0W+zFy8ZrH7gRiag3KZuZU15pFXYom7wdZ8zcHJZZh2wi43hiBEWt8asx8Osyx4EhYO5SNp9ewkg==
+"@langchain/community@^0.3.42":
+  version "0.3.42"
+  resolved "https://registry.yarnpkg.com/@langchain/community/-/community-0.3.42.tgz#2f5a6a09aec239aede0d1f3c9ee0bf27bda98585"
+  integrity sha512-dTRoAy4XPalCB4Of5N4uQ8/KSGCddv48OGek8CULtdbBSkQ9s7iWtcb8hQEajkCwMfILVVzw1pU8IzE17oNHPA==
   dependencies:
     "@langchain/openai" ">=0.2.0 <0.6.0"
     binary-extensions "^2.2.0"
@@ -799,10 +799,10 @@
     zod "^3.22.3"
     zod-to-json-schema "^3.22.5"
 
-"@langchain/core@^0.3.49":
-  version "0.3.49"
-  resolved "https://registry.yarnpkg.com/@langchain/core/-/core-0.3.49.tgz#abccfc6c20d237536a90f1379f682177bb02e5ee"
-  integrity sha512-ESEbxjtVtZTpgMPrLFEQZVHA5EVJuDYV3XzTFQ8haPHmBJfzskl6TINFttoGKTGbv799DZrRwnd5fbuCN5NDEA==
+"@langchain/core@^0.3.55":
+  version "0.3.55"
+  resolved "https://registry.yarnpkg.com/@langchain/core/-/core-0.3.55.tgz#e8a0d60833cb709ce6ab2ac2d348683b439c9856"
+  integrity sha512-SojY2ugpT6t9eYfFB9Ysvyhhyh+KJTGXs50hdHUE9tAEQWp3WAwoxe4djwJnOZ6fSpWYdpFt2UT2ksHVDy2vXA==
   dependencies:
     "@cfworker/json-schema" "^4.0.2"
     ansi-styles "^5.0.0"
@@ -826,6 +826,14 @@
     openai "^4.93.0"
     zod "^3.22.4"
     zod-to-json-schema "^3.22.3"
+
+"@langchain/pinecone@^0.2.0":
+  version "0.2.0"
+  resolved "https://registry.yarnpkg.com/@langchain/pinecone/-/pinecone-0.2.0.tgz#2d944b7fb48d36b71e6d232098b931bf4ffae7cf"
+  integrity sha512-O3tWSCIbm1uDLh0J4R0ETmYeRFtQAI2qcSAMC/VW1+xBb+o/IJ5VMyJhGKc4RsmyWE0wG4kOuwfIcCP+XV0clw==
+  dependencies:
+    flat "^5.0.2"
+    uuid "^10.0.0"
 
 "@langchain/textsplitters@>=0.0.0 <0.2.0":
   version "0.1.0"
@@ -978,6 +986,11 @@
   version "0.4.3"
   resolved "https://registry.yarnpkg.com/@oddbird/popover-polyfill/-/popover-polyfill-0.4.3.tgz#310d61c8fc7ee12d8dba05cdfa8bd7e5d5a281a3"
   integrity sha512-kBS0ZAwH8kZqFl0mV89KPK4cLYl2ZoKSfYngK4dz1eLAhKzTK0yu4LrvLdMeM7JhjWK6GxBtiY+cl1s6vR2pUg==
+
+"@pinecone-database/pinecone@^5.1.2":
+  version "5.1.2"
+  resolved "https://registry.yarnpkg.com/@pinecone-database/pinecone/-/pinecone-5.1.2.tgz#9e2766e62a7a82d6df321ebe892415f565068315"
+  integrity sha512-z7737KUA1hXwd508q1+o4bnRxj0NpMmzA2beyaFm7Y+EC2TYLT5ABuYsn/qhiwiEsYp8v1qS596eBhhvgNagig==
 
 "@puppeteer/browsers@2.10.4":
   version "2.10.4"
@@ -1805,6 +1818,15 @@ available-typed-arrays@^1.0.7:
   integrity sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==
   dependencies:
     possible-typed-array-names "^1.0.0"
+
+axios@^1.9.0:
+  version "1.9.0"
+  resolved "https://registry.yarnpkg.com/axios/-/axios-1.9.0.tgz#25534e3b72b54540077d33046f77e3b8d7081901"
+  integrity sha512-re4CqKTJaURpzbLHtIi6XpDv20/CnpXOtjRY5/CU32L8gU8ek9UIivcfvSWvmKEngmVbrUtPpdDwWDWL7DNHvg==
+  dependencies:
+    follow-redirects "^1.15.6"
+    form-data "^4.0.0"
+    proxy-from-env "^1.1.0"
 
 b4a@^1.6.4:
   version "1.6.7"
@@ -3198,6 +3220,11 @@ focus-trap@7.5.4:
   integrity sha512-N7kHdlgsO/v+iD/dMoJKtsSqs5Dz/dXZVebRgJw23LDk+jMi/974zyiOYDziY2JPp8xivq9BmUGwIJMiuSBi7w==
   dependencies:
     tabbable "^6.2.0"
+
+follow-redirects@^1.15.6:
+  version "1.15.9"
+  resolved "https://registry.yarnpkg.com/follow-redirects/-/follow-redirects-1.15.9.tgz#a604fa10e443bf98ca94228d9eebcc2e8a2c8ee1"
+  integrity sha512-gew4GsXizNgdoRyqmyfMHyAmXsZDk6mHkSxZFCzW9gwlbtOW44CDtYavM+y+72qD/Vq2l550kMF52DT8fOLJqQ==
 
 for-each@^0.3.3, for-each@^0.3.5:
   version "0.3.5"

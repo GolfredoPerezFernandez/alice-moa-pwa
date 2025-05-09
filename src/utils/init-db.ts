@@ -220,11 +220,28 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
         message: 'One or more required tables were not created successfully'
       };
     }
+
+    // Migration: Check and add pdfUrl column to legalDocument if it doesn't exist
+    try {
+      const tableInfoResult = await client.execute("PRAGMA table_info(legalDocument);");
+      const columns = tableInfoResult.rows.map((row: any) => row.name);
+      if (!columns.includes('pdfUrl')) {
+        console.log('[DB-INIT-MIGRATE] Column "pdfUrl" not found in "legalDocument". Adding it...');
+        await client.execute("ALTER TABLE legalDocument ADD COLUMN pdfUrl TEXT;");
+        console.log('[DB-INIT-MIGRATE] Successfully added "pdfUrl" column to "legalDocument".');
+      } else {
+        console.log('[DB-INIT-MIGRATE] Column "pdfUrl" already exists in "legalDocument".');
+      }
+    } catch (migrationError) {
+      console.error('[DB-INIT-MIGRATE] Error during legalDocument migration for pdfUrl:', migrationError);
+      // Depending on the error, you might want to return failure or log and continue
+      // For now, log and continue, as the main table creation might have succeeded.
+    }
     
     console.log('[DB-INIT] Database initialized successfully');
     return {
       success: true,
-      message: 'Database tables initialized successfully (including scraper schema)'
+      message: 'Database tables initialized successfully (including scraper schema and migrations)'
     };
   } catch (error) {
     console.error('[DB-INIT] Error initializing database:', error);

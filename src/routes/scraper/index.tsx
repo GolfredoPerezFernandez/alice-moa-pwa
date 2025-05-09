@@ -62,6 +62,7 @@ interface DisplayDocument {
   content: string;
   updatedAt: string; // Keep as string from DB, format in template
   publicationDate?: string | null; // Keep as string from DB, format in template
+  pdfUrl?: string | null; // Add pdfUrl
 }
 
 export const useScrapedDocuments = routeLoader$(async function (this: RequestEventBase) {
@@ -79,7 +80,7 @@ export const useScrapedDocuments = routeLoader$(async function (this: RequestEve
     }
 
     const result = await executeQuery(this,
-      "SELECT id, title, url, documentType, content, updatedAt, publicationDate FROM legalDocument ORDER BY updatedAt DESC LIMIT 20"
+      "SELECT id, title, url, documentType, content, updatedAt, publicationDate, pdfUrl FROM legalDocument ORDER BY updatedAt DESC LIMIT 20" // Added pdfUrl
     );
     // Ensure rows are correctly typed or cast if necessary
     return result.rows.map((row: any) => ({
@@ -90,6 +91,7 @@ export const useScrapedDocuments = routeLoader$(async function (this: RequestEve
       content: row.content as string,
       updatedAt: row.updatedAt as string, // Turso might return ISO string
       publicationDate: row.publicationDate ? row.publicationDate as string : null,
+      pdfUrl: row.pdfUrl ? row.pdfUrl as string : null, // Add pdfUrl
     })) as DisplayDocument[];
   } catch (e) {
     console.error("Error fetching documents in routeLoader$:", e);
@@ -207,9 +209,14 @@ export default component$(() => {
       <section class="status-section">
         <h2>Scraper Control & Status</h2>
         {!isLoading.value && (
-          <button onClick$={handleRunScraper}>
-            Run Scraper Manually
-          </button>
+          <div style="display: flex; gap: 10px;">
+            <button onClick$={handleRunScraper}>
+              Run Scraper Manually
+            </button>
+            <button onClick$={handleRunScraper} title="Performs a comprehensive scrape, same as 'Run Scraper Manually'">
+              Iniciar Scrapeo Diario
+            </button>
+          </div>
         )}
         {isLoading.value && (
           <>
@@ -265,6 +272,9 @@ export default component$(() => {
                 <p><strong>URL:</strong> <a href={doc.url} target="_blank" rel="noopener noreferrer">{doc.url}</a></p>
                 <p><strong>Last Updated:</strong> {new Date(doc.updatedAt).toLocaleString()}</p>
                 {doc.publicationDate && <p><strong>Published:</strong> {new Date(doc.publicationDate).toLocaleDateString()}</p>}
+                {doc.documentType === 'convenio' && doc.pdfUrl && (
+                  <p><strong>PDF:</strong> <a href={doc.pdfUrl} target="_blank" rel="noopener noreferrer" download class="download-pdf-btn">Download PDF</a></p>
+                )}
                 <details>
                   <summary>View Full Content</summary>
                   <p class="content-snippet">{doc.content}...</p>
@@ -388,8 +398,21 @@ export default component$(() => {
             background-color: #d32f2f;
           }
           .delete-all-btn {
-            float: right; 
-            margin-top: -5px; 
+            float: right;
+            margin-top: -5px;
+          }
+          .download-pdf-btn {
+            display: inline-block;
+            margin-left: 10px;
+            padding: 3px 8px;
+            font-size: 0.85em;
+            background-color: #28a745; /* Green */
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+          }
+          .download-pdf-btn:hover {
+            background-color: #218838;
           }
         `}
       </style>
