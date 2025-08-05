@@ -11,8 +11,7 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
   console.log('[DB-INIT] Starting database initialization');
   const client = tursoClient(requestEvent);
   
-  try {
-    // Use a hardcoded schema to avoid file system issues
+  try {    // Use a hardcoded schema to avoid file system issues
     console.log('[DB-INIT] Using hardcoded auth schema');
     
     // Define the auth schema directly in the code
@@ -44,6 +43,19 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
 
       -- Index for faster history retrieval per user
       CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON chat_history(user_id);
+      
+      -- Text Chat Messages Table (for chat without avatar)
+      CREATE TABLE IF NOT EXISTS text_chat_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')), -- Who sent the message
+          content TEXT NOT NULL, -- The message text
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE -- Link to users table
+      );
+
+      -- Index for faster text chat history retrieval per user
+      CREATE INDEX IF NOT EXISTS idx_text_chat_messages_user_id ON text_chat_messages(user_id);
     `;
     
     // Split the SQL into separate statements and execute them

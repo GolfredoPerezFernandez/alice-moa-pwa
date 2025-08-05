@@ -168,6 +168,22 @@ export default component$(() => {
                     <span>Chat</span>
                   </div>
                 </Link>
+                
+                {/* Link to Text-only Chat */}
+                <Link
+                  href="/text-chat"
+                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive('/text-chat')
+                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  <div class="flex items-center">
+                    <LuMessageSquare class="w-5 h-5 mr-1.5" />
+                    <span>Text Chat</span>
+                  </div>
+                </Link>
+                
                 {/* Add other relevant links if needed, e.g., Admin panel for admin users */}
                 <Link
                   href="/auth/logout"
@@ -296,6 +312,23 @@ export default component$(() => {
                     <span>Chat</span>
                   </div>
                 </Link>
+                
+                {/* Link to Text-only Chat (Mobile) */}
+                <Link
+                  href="/text-chat"
+                  class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                    isActive('/text-chat')
+                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                  }`}
+                  onClick$={() => (isMobileMenuOpen.value = false)}
+                >
+                  <div class="flex items-center">
+                    <LuMessageSquare class="w-5 h-5 mr-3" />
+                    <span>Text Chat</span>
+                  </div>
+                </Link>
+                
                 {/* Add other relevant links if needed */}
                 <Link
                   href="/auth/logout"
@@ -332,8 +365,8 @@ export default component$(() => {
         <Slot />
       </main>
 
-      {/* Footer - Not displayed on chat page */}
-      {!location.url.pathname.startsWith('/chat') && (
+      {/* Footer - Not displayed on chat or text-chat pages */}
+      {!location.url.pathname.startsWith('/chat') && !location.url.pathname.startsWith('/text-chat') && (
         <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-6 mt-auto">
           <div class="container mx-auto px-4">
             <div class="flex flex-col md:flex-row justify-between items-center">

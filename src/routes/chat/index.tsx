@@ -2,6 +2,12 @@ import { component$, useSignal, useStore, useStylesScoped$, useVisibleTask$, $, 
 import { routeLoader$, server$, Form, routeAction$, zod$, z } from '@builder.io/qwik-city';
 import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
+// Import flag SVGs for each country
+import US from 'country-flag-icons/string/3x2/US';
+import ES from 'country-flag-icons/string/3x2/ES';
+import IT from 'country-flag-icons/string/3x2/IT';
+import FR from 'country-flag-icons/string/3x2/FR';
+import BR from 'country-flag-icons/string/3x2/BR';
 // Import Lucide icons from @qwikest/icons
 import {
   LuVolume2,
@@ -40,17 +46,37 @@ const DID_API_URL = import.meta.env.DID_API_URL || "https://api.d-id.com";
 // const DID_API_KEY = import.meta.env.DID_API_KEY;
 // const OPENAI_API_KEY = import.meta.env.OPENAI_API_KEY;
 
+// Get country code for language
+const getLanguageCode = (langCode: string): string => {
+  for (const lang of languages) {
+    if (lang.value === langCode) {
+      return lang.code;
+    }
+  }
+  return 'US'; // Default to US
+};
+// Define flag SVGs for each language
+const flagSvgs = {
+  'US': US,
+  'ES': ES,
+  'IT': IT,
+  'FR': FR,
+  'BR': BR
+};
+
 const languages = [
-  { value: "en-US", label: "English" },
-  { value: "es-ES", label: "Spanish" },
-  { value: "it-IT", label: "Italian" },
-  { value: "pt-BR", label: "Portuguese" },
+  { value: "en-US", label: "English", code: 'US', flagSvg: flagSvgs['US'] },
+  { value: "es-ES", label: "Spanish", code: 'ES', flagSvg: flagSvgs['ES'] },
+  { value: "it-IT", label: "Italian", code: 'IT', flagSvg: flagSvgs['IT'] },
+  { value: "fr-FR", label: "French", code: 'FR', flagSvg: flagSvgs['FR'] },
+  { value: "pt-BR", label: "Portuguese", code: 'BR', flagSvg: flagSvgs['BR'] },
 ];
 
 const languageMap: Record<string, string> = {
   'en-US': 'English',
   'es-ES': 'Spanish',
   'it-IT': 'Italian',
+  'fr-FR': 'French',
   'pt-BR': 'Portuguese'
 };
 
@@ -58,9 +84,9 @@ const voiceMap: Record<string, VoiceSettings> = {
   'en-US': { type: 'microsoft', voice_id: 'en-US-JennyNeural' },
   'es-ES': { type: 'microsoft', voice_id: 'es-ES-AbrilNeural' },
   'it-IT': { type: 'microsoft', voice_id: 'it-IT-IsabellaNeural' },
+  'fr-FR': { type: 'microsoft', voice_id: 'fr-FR-DeniseNeural' },
   'pt-BR': { type: 'microsoft', voice_id: 'pt-BR-BrendaNeural' }
 };
-
 // --- Helper Functions ---
 const getVoiceSettings = (languageCode: string): VoiceSettings => {
   return voiceMap[languageCode] || voiceMap['en-US']; // Default to English
@@ -376,7 +402,26 @@ const serverProcessAudio = server$(async function(audioBase64: string, mimeType:
         
         // Append the blob with a filename
         formData.append("file", blob, "audio.webm");
-        formData.append("prompt", `The following is a conversation in ${language}.`);
+        
+        // Convertir el nombre del idioma a código ISO-639-1
+        let languageCode = "";
+        switch (language.toLowerCase()) {
+            case "english": languageCode = "en"; break;
+            case "spanish": languageCode = "es"; break;
+            case "italian": languageCode = "it"; break;
+            case "french": languageCode = "fr"; break;
+            case "portuguese": languageCode = "pt"; break;
+            default: languageCode = "en";
+        }
+        
+        // Añadir el idioma en formato ISO-639-1 a la API de Whisper
+        formData.append("language", languageCode);
+        
+        console.log(`Server: Audio processing - Using language code '${languageCode}' for '${language}'`);
+        
+        // Mejorar el prompt para proporcionar más contexto basado en el idioma
+        formData.append("prompt", `The following is a conversation in ${language}. Please transcribe accurately maintaining the original language.`);
+        
         formData.append("model", "whisper-1");
         formData.append("response_format", "text");
 
@@ -398,7 +443,8 @@ const serverProcessAudio = server$(async function(audioBase64: string, mimeType:
         }
 
         const transcriptionText = await response.text();
-        console.log("Server: Transcription result:", transcriptionText);
+        console.log(`Server: Transcription result (${language}):`, transcriptionText);
+        console.log(`Server: Transcription length: ${transcriptionText.length} characters`);
         return transcriptionText.trim();
 
     } catch (error: any) {
@@ -734,6 +780,12 @@ export default component$(() => {
         }
     });
 const playIdleVideo$ = $(() => {
+    // Don't switch to idle if we know we're loading - avatar should appear soon
+    if (loading.value || initiating.value) {
+        console.log("Not playing idle video while loading or initiating");
+        return;
+    }
+
     const video = videoRef.value;
     if (!video) {
         console.error("Cannot play idle video - video element reference is null");
@@ -742,123 +794,244 @@ const playIdleVideo$ = $(() => {
 
     console.log("Attempting to play idle video");
     
-    // Always completely reset the video element for a clean slate
-    // For idle video we can safely stop all tracks since we're switching modes
-    if (video.srcObject) {
-        console.log("Switching to idle video, stopping existing stream tracks");
-        try {
-            (video.srcObject as MediaStream).getTracks().forEach(track => {
-                console.log(`Stopping track for idle video: ${track.id}, kind: ${track.kind}, state: ${track.readyState}`);
-                track.stop();
-            });
-        } catch (err) {
-            console.warn("Error stopping tracks for idle video:", err);
+    // Check if we have an actively playing stream and an active connection
+    const pc = peerConnectionRef.value;
+    const hasActiveConnection = pc && pc.connectionState === 'connected';
+    
+    // First, check if we should even switch to idle
+    if (hasActiveConnection && video.srcObject instanceof MediaStream) {
+        const activeTracks = video.srcObject.getVideoTracks().filter(t => t.readyState === 'live' && !t.muted);
+        
+        // If we have active live video tracks *with* actual data flowing, don't switch
+        if (activeTracks.length > 0 && videoIsPlayingRef.value) {
+            console.log("Active video stream with data is playing, not switching to idle");
+            return;
         }
-        video.srcObject = null; // Clear the srcObject
+        
+        console.log("Switching to idle despite connection because stream is inactive");
     }
-
-    if (video.src && video.src.includes('prs_alice.idle.mp4') && !video.paused) {
-        console.log("Idle video already playing, no need to restart");
+    
+    // At this point, we know we need to switch to idle
+    
+    // Properly handle WebRTC stream cleanup
+    if (video.srcObject instanceof MediaStream) {
+        try {
+            // Detach tracks from video element first
+            const currentTracks = video.srcObject.getTracks();
+            
+            if (hasActiveConnection) {
+                // If we still have an active connection, just detach tracks without stopping
+                console.log("Preserving WebRTC tracks while switching to idle");
+                currentTracks.forEach(track => {
+                    console.log(`Track preserved: ${track.id}, kind: ${track.kind}, state: ${track.readyState}`);
+                });
+            } else {
+                // If connection is gone, we can safely stop all tracks
+                console.log("No active connection, safely stopping all tracks");
+                currentTracks.forEach(track => {
+                    console.log(`Stopping track: ${track.id}, kind: ${track.kind}, state: ${track.readyState}`);
+                    track.stop();
+                });
+            }
+        } catch (err) {
+            console.warn("Error handling stream tracks:", err);
+        }
+    }
+    
+    // If the idle video is already playing properly, don't restart it
+    if (video.src &&
+        video.src.includes('prs_alice.idle.mp4') &&
+        !video.paused &&
+        !video.ended &&
+        video.readyState >= 3) { // HAVE_FUTURE_DATA or better
+        console.log("Idle video already playing correctly, no need to restart");
         return;
     }
 
+    // Clear the srcObject reference (after we've dealt with the tracks)
+    video.srcObject = null;
+    
     // Reset any previous video state
     video.pause();
+    video.removeAttribute('srcObject'); // Ensure srcObject is fully cleared
     video.currentTime = 0;
 
-    // Validamos ruta del archivo
-    const videoPath = '/prs_alice.idle.mp4';
-    console.log("Ruta del video de espera:", videoPath);
+    // Use a direct, absolute path to the idle video
+    const fullVideoPath = window.location.origin + '/prs_alice.idle.mp4';
+    console.log("Idle video path:", fullVideoPath);
 
-    // Set properties and force play
+    // Set properties and force play with a more structured approach
     try {
-        // Set direct properties
-        video.src = videoPath;
+        // First, clear any previous src to avoid conflicts
+        video.removeAttribute('src');
+        video.load(); // Important to fully reset video state
+        
+        // Configure for maximum autoplay compatibility
+        video.muted = true; // Force muted initially
         video.loop = true;
-        video.muted = true; // Force mute initially to ensure autoplay
         video.style.display = 'block';
         video.autoplay = true;
         video.playsInline = true;
+        video.controls = false;
         
-        console.log("Video properties set, attempting to play idle video from:", video.src);
+        // Set the src and load
+        video.src = fullVideoPath;
+        video.load(); // Load the new source
         
-        // Force play immediately with multiple fallbacks
-        const playPromise = video.play();
+        console.log("Video configured, attempting to play idle video");
         
-        if (playPromise !== undefined) {
-            playPromise.then(() => {
-                console.log("Idle video playing successfully");
-                // Once playing works, restore user's mute preference with a delay
-                setTimeout(() => {
-                    video.muted = muteVideo.value;
-                }, 500);
-            }).catch(e => {
-                console.error("Error playing idle video:", e);
-                
-                // First fallback: retry with guaranteed mute
+        // Play with structured error handling and multiple fallbacks
+        const attemptPlay = () => {
+            return video.play()
+                .then(() => {
+                    console.log("Idle video playing successfully");
+                    videoIsPlayingRef.value = false; // We're in idle mode
+                    
+                    // Restore user's mute preference after successful play
+                    setTimeout(() => {
+                        video.muted = muteVideo.value;
+                    }, 300);
+                    
+                    return true;
+                })
+                .catch(error => {
+                    console.error("Error playing idle video:", error);
+                    return false;
+                });
+        };
+        
+        // First attempt
+        attemptPlay().then(success => {
+            if (!success) {
+                // First fallback: forced mute + delay
+                console.log("Retrying with forced mute after delay");
                 video.muted = true;
-                const retryPromise = video.play();
                 
-                if (retryPromise !== undefined) {
-                    retryPromise.catch(e2 => {
-                        console.error("Failed first retry playing idle video:", e2);
-                        
-                        // Second fallback: try with user interaction simulation
-                        setTimeout(() => {
+                setTimeout(() => {
+                    attemptPlay().then(fallbackSuccess => {
+                        if (!fallbackSuccess) {
+                            // Final fallback: reload video + forced settings
+                            console.log("Final retry with video reload");
+                            video.load();
                             video.muted = true;
-                            video.play().catch(e3 => {
-                                console.error("Failed all retries playing idle video:", e3);
+                            video.autoplay = true;
+                            video.currentTime = 0;
+                            
+                            video.play().catch(finalError => {
+                                console.error("All idle video play attempts failed:", finalError);
                             });
-                        }, 1000);
+                        }
                     });
-                }
-            });
-        }
+                }, 500);
+            }
+        });
     } catch (err) {
         console.error("Exception setting up idle video:", err);
     }
 });
 
-     const onVideoStatusChange$ = $((isPlaying: boolean, stream: MediaStream | null) => {
+    const onVideoStatusChange$ = $((isPlaying: boolean, stream: MediaStream | null) => {
+        console.log("Video status change called - isPlaying:", isPlaying, "stream exists:", !!stream);
+        
+        // If we're in the middle of certain operations, we should defer video changes
+        const isProcessing = initiating.value || loading.value;
+        
         if (isPlaying && stream) {
-            // Check if the stream actually has active video tracks before switching
-            const hasActiveTracks = stream.getVideoTracks().some(track => track.readyState === 'live');
+            // Verify the stream actually has active video tracks before switching
+            const videoTracks = stream.getVideoTracks();
+            const hasActiveTracks = videoTracks.length > 0 && videoTracks.some(track => track.readyState === 'live');
+            
+            console.log(`Stream has ${videoTracks.length} video tracks, active: ${hasActiveTracks}`);
             
             if (hasActiveTracks) {
                 console.log("Setting active video stream with live tracks");
-                // Don't reset srcObject to null as this can cause tracks to be stopped
+                
+                // Special handling if we're in a processing state
+                if (isProcessing) {
+                    console.log("Currently initiating or loading, scheduling stream for later");
+                    // Store reference to stream to use when ready, but don't immediately set
+                    setTimeout(() => {
+                        if (videoRef.value) {
+                            console.log("Setting delayed video stream");
+                            // Use a safe method to set the video source without stopping existing tracks
+                            const video = videoRef.value;
+                            
+                            // Only replace stream if not already set or if the track IDs changed
+                            if (!video.srcObject ||
+                                !(video.srcObject instanceof MediaStream) ||
+                                video.srcObject.getVideoTracks().length === 0) {
+                                
+                                console.log("Setting stream with safe transition");
+                                video.srcObject = stream;
+                                video.muted = muteVideo.value;
+                                video.style.display = 'block';
+                                
+                                video.play().catch(e => {
+                                    console.error("Error playing delayed video:", e);
+                                    if (e.name === 'NotAllowedError') {
+                                        video.muted = true;
+                                        video.play().catch(e2 => console.error("Still cannot play video:", e2));
+                                    }
+                                });
+                            } else {
+                                console.log("Video already has a valid srcObject, skipping update");
+                            }
+                        }
+                    }, 1000);
+                    return;
+                }
+                
+                // Normal flow for setting video stream
                 if (videoRef.value) {
-                    // CRITICAL: We must not stop the WebRTC tracks as it terminates the stream
-                    // Don't clear srcObject or stop tracks from the peer connection
-                    
-                    // Set the stream directly
-                    console.log("Setting stream directly to video element");
-                    videoRef.value.srcObject = stream;
-                    videoRef.value.muted = muteVideo.value;
-                    videoRef.value.style.display = 'block';
-                    
-                    // Play the video
-                    videoRef.value.play().catch(e => {
-                        console.error('Error playing video:', e);
-                        if (e.name === 'NotAllowedError') {
-                            videoRef.value!.muted = true;
-                            videoRef.value!.play().catch(e2 => {
-                                console.error('Still cannot play video:', e2);
+                    try {
+                        const video = videoRef.value;
+                        
+                        // CRITICAL: If we had a src URL (from idle video), we need to clear it properly first
+                        if (video.src) {
+                            video.pause();
+                            video.removeAttribute('src');
+                            video.load(); // Important to reset the video element
+                        }
+                        
+                        console.log("Setting stream directly to video element");
+                        video.srcObject = stream;
+                        video.muted = muteVideo.value;
+                        video.style.display = 'block';
+                        
+                        // Force play with retries
+                        const playPromise = video.play();
+                        if (playPromise !== undefined) {
+                            playPromise.catch(e => {
+                                console.error('Error playing video:', e);
+                                if (e.name === 'NotAllowedError') {
+                                    video.muted = true;
+                                    video.play().catch(e2 => console.error('Still cannot play video:', e2));
+                                }
                             });
                         }
-                    });
+                    } catch (err) {
+                        console.error("Error setting video stream:", err);
+                    }
                 } else {
-                    setVideoElement$(stream);
+                    console.warn("Video ref is null, cannot set stream");
                 }
             } else {
-                console.log("Stream has no active tracks, keeping idle video");
-                playIdleVideo$();
+                console.log("Stream has no active tracks or all tracks ended");
+                // Only switch to idle if we're not in the middle of something important
+                if (!isProcessing) {
+                    console.log("No processing in progress, switching to idle video");
+                    playIdleVideo$();
+                } else {
+                    console.log("Processing in progress, keeping current video state");
+                }
             }
         } else {
-            // Only play idle if not currently loading a response/talk
-            if (!loading.value) {
+            // We're explicitly told to play idle video
+            if (!isProcessing) {
                 console.log("No active stream, playing idle video");
                 playIdleVideo$();
+            } else {
+                console.log("Loading or initiating, not switching to idle video yet");
             }
         }
     });
@@ -952,83 +1125,125 @@ const onTrack$ = $((event: RTCTrackEvent) => {
             if (event.track.kind === 'video' && stream.getVideoTracks().length > 0) {
                 console.log('Video stream available after unmute');
                 
-                // Directly set to video element to avoid our helper function that might
-                // be stopping tracks inadvertently
-                const video = videoRef.value;
-                if (video) {
-                    console.log('Setting unmuted stream directly to video element');
-                    
-                    // Just set the srcObject directly without stopping tracks
-                    video.srcObject = stream;
-                    video.style.display = 'block';
-                    video.muted = muteVideo.value;
-                    
-                    video.play().catch(e => {
-                        console.error('Error playing unmuted stream:', e);
-                        if (e.name === 'NotAllowedError') {
-                            video.muted = true;
-                            video.play().catch(e2 => {
-                                console.error('Still cannot play unmuted stream:', e2);
-                            });
-                        }
-                    });
+                // Only set the video src directly if we're not currently in the middle of loading
+                // or if we specifically want to show the avatar animation
+                if (!loading.value || videoIsPlayingRef.value) {
+                    // Directly set to video element to avoid our helper function that might
+                    // be stopping tracks inadvertently
+                    const video = videoRef.value;
+                    if (video) {
+                        console.log('Setting unmuted stream directly to video element');
+                        
+                        // Just set the srcObject directly without stopping tracks
+                        video.srcObject = stream;
+                        video.style.display = 'block';
+                        video.muted = muteVideo.value;
+                        
+                        video.play().catch(e => {
+                            console.error('Error playing unmuted stream:', e);
+                            if (e.name === 'NotAllowedError') {
+                                video.muted = true;
+                                video.play().catch(e2 => {
+                                    console.error('Still cannot play unmuted stream:', e2);
+                                });
+                            }
+                        });
+                    }
+                } else {
+                    console.log('Not setting video element yet as we are still loading or waiting for active tracks');
                 }
             }
         }
     });
 
     // Don't clear stats interval - we need it to continuously monitor stream activity
+    // But we should clear any existing interval first to avoid duplicates
+    if (statsIntervalIdRef.value) {
+        clearInterval(statsIntervalIdRef.value);
+        statsIntervalIdRef.value = null;
+    }
 
-        // Don't immediately switch to the stream until we confirm there's actual video data
-        // Keep showing idle video until we have confirmed video data flowing
+    // Create a more robust stats gathering interval
+    statsIntervalIdRef.value = setInterval(async () => {
+        if (!pc || pc.connectionState !== 'connected') {
+            if (statsIntervalIdRef.value) clearInterval(statsIntervalIdRef.value);
+            statsIntervalIdRef.value = null;
+            return;
+        }
         
-        statsIntervalIdRef.value = setInterval(async () => {
-            if (!pc || pc.connectionState !== 'connected') { // Check pc ref directly
-                if (statsIntervalIdRef.value) clearInterval(statsIntervalIdRef.value);
-                return;
-            }
-            try {
-                const stats = await pc.getStats(event.track);
-                let foundActiveVideo = false;
+        try {
+            // Get stats for all receivers instead of just this track
+            // This is more reliable especially when tracks change
+            const receivers = pc.getReceivers();
+            let foundActiveVideo = false;
+            let totalBytesReceived = 0;
+            
+            // First check if we have any active video tracks at all
+            const videoTracks = receivers
+                .filter((receiver: RTCRtpReceiver) => receiver.track && receiver.track.kind === 'video' && receiver.track.readyState === 'live')
+                .map((receiver: RTCRtpReceiver) => receiver.track);
+                
+            console.log(`Found ${videoTracks.length} active video tracks`);
+            
+            if (videoTracks.length > 0) {
+                // Then get detailed stats for each track
+                const stats = await pc.getStats();
+                
                 stats.forEach((report: RTCStats) => {
                     if (report.type === 'inbound-rtp' && 'mediaType' in report && report.mediaType === 'video') {
                         foundActiveVideo = true;
+                        
                         const bytesReceived = 'bytesReceived' in report ? report.bytesReceived as number : 0;
-                        // Only consider video actively playing if we're receiving actual data
+                        totalBytesReceived += bytesReceived;
+                        
+                        // Consider video actively playing if we're receiving increasing data
                         const isActivelyReceivingData = bytesReceived > lastBytesReceivedRef.value && bytesReceived > 0;
                         const videoStatusChanged = videoIsPlayingRef.value !== isActivelyReceivingData;
                         
                         if (videoStatusChanged) {
                             videoIsPlayingRef.value = isActivelyReceivingData;
+                            
                             if (isActivelyReceivingData) {
                                 console.log("D-ID video stream now actively receiving data, switching from idle");
-                                onVideoStatusChange$(true, event.streams[0]); // Call QRL version
+                                
+                                // Get all tracks to create a complete stream
+                                const allTracks = receivers
+                                    .filter((receiver: RTCRtpReceiver) => receiver.track && receiver.track.readyState === 'live')
+                                    .map((receiver: RTCRtpReceiver) => receiver.track);
+                                    
+                                // Create a fresh stream with all active tracks
+                                const completeStream = new MediaStream(allTracks);
+                                
+                                // Use our status change handler to update the video
+                                onVideoStatusChange$(true, completeStream);
                             } else if (!loading.value) {
                                 console.log("D-ID video stream paused, reverting to idle");
-                                onVideoStatusChange$(false, null); // Call QRL version
+                                onVideoStatusChange$(false, null);
                             }
                         }
-                        lastBytesReceivedRef.value = bytesReceived;
+                        // Store total bytes for next comparison
+                        lastBytesReceivedRef.value = totalBytesReceived;
                     }
                 });
-                
-                if (!foundActiveVideo && videoIsPlayingRef.value) {
-                    console.log("No active video tracks found in stats");
-                    videoIsPlayingRef.value = false;
-                    if (!loading.value) { // Only play idle if not loading response
-                        onVideoStatusChange$(false, null); // Call QRL version
-                    }
-                }
-            } catch (error) {
-                console.error('Error getting stats:', error);
-                if (statsIntervalIdRef.value) clearInterval(statsIntervalIdRef.value);
             }
-        }, 1000);
+            
+            // Handle case when no active video is found but we thought we were playing
+            if (!foundActiveVideo && videoIsPlayingRef.value) {
+                console.log("No active video tracks found in stats");
+                videoIsPlayingRef.value = false;
+                
+                // Only switch to idle if we're not in the middle of loading something
+                if (!loading.value) {
+                    onVideoStatusChange$(false, null);
+                }
+            }
+        } catch (error) {
+            console.error('Error getting stats:', error);
+        }
+    }, 1000);
 
-        // We don't immediately switch to the stream on track event
-        // Instead, we wait for the stats interval to confirm actual video data
-        console.log("Video track received, waiting for active video data before switching from idle");
-    });
+    console.log("Track handler set up, waiting for active video data before switching from idle");
+});
 
     const closePC$ = $((triggerServerClose = true) => {
         const pc = peerConnectionRef.value;
@@ -1054,9 +1269,18 @@ const onTrack$ = $((event: RTCTrackEvent) => {
         // Stop video tracks associated with the connection
         const video = videoRef.value;
         if (video?.srcObject && video.srcObject instanceof MediaStream) {
-             console.log("Stopping tracks during PC close");
-             video.srcObject.getTracks().forEach(track => track.stop());
-             video.srcObject = null;
+            console.log("Stopping tracks during PC close - this IS the right place to stop tracks");
+            
+            // Here we SHOULD stop all tracks as the connection is being terminated
+            const tracks = video.srcObject.getTracks();
+            console.log(`Stopping ${tracks.length} tracks during peer connection close`);
+            
+            tracks.forEach(track => {
+                console.log(`Stopping track: ${track.id}, kind: ${track.kind}, state: ${track.readyState}`);
+                track.stop();
+            });
+            
+            video.srcObject = null;
         }
 
         pc.close();
@@ -1218,40 +1442,62 @@ const onTrack$ = $((event: RTCTrackEvent) => {
         });
     });
 
-    // Load chat history on component initialization
-    useVisibleTask$(async ({ cleanup }) => {
-        if (!initialData.value?.userId || chatHistoryLoaded.value) return;
+    // Load chat history on component initialization or when userId changes
+    useVisibleTask$(async ({ track }) => { 
+        track(() => initialData.value?.userId); // Re-run this effect if userId changes
+
+        const currentUserId = initialData.value?.userId;
+
+        // Clear chat history before loading new history or showing default messages.
+        // This ensures that if a user logs out and another logs in, or if userId changes,
+        // the old history is cleared immediately.
+        chatHistory.splice(0, chatHistory.length);
+        chatHistoryLoaded.value = false; // Reset loaded status
+
+        if (!currentUserId) {
+            console.log("[CHAT HISTORY] No user ID, showing default welcome message.");
+            // Optionally, you could set loading.value here if you want a spinner
+            chatHistory.push({
+                role: "assistant",
+                content: "Welcome! Please log in to see your chat history or start a new conversation."
+            });
+            chatHistoryLoaded.value = true;
+            return;
+        }
         
+        console.log(`[CHAT HISTORY] Loading chat history for user: ${currentUserId}`);
+        // Consider adding a loading state specific to chat history loading if it's slow
+        // loading.value = true; // This is a general loading signal, might be okay for now
+
         try {
-            console.log("Loading chat history for user:", initialData.value.userId);
-            const history = await serverLoadChatHistory(initialData.value.userId);
+            const history = await serverLoadChatHistory(currentUserId);
             
-            // If we got messages, use them instead of default welcome message
             if (history && history.length > 0) {
-                // Convert the loaded history to ChatMessage format
-                chatHistory.splice(0, chatHistory.length, ...history.map((msg: any) => ({
-                    role: msg.role,
-                    content: msg.content
-                })));
-                console.log(`Loaded ${history.length} chat messages from history`);
+                // Map all fields, including timestamp if available and used in UI
+                const mappedHistory = history.map((msg: any) => ({
+                    role: msg.role as 'user' | 'assistant' | 'system',
+                    content: msg.content as string,
+                    timestamp: msg.timestamp as string | undefined 
+                }));
+                chatHistory.splice(0, chatHistory.length, ...mappedHistory);
+                console.log(`[CHAT HISTORY] Loaded ${history.length} messages for user ${currentUserId}.`);
             } else {
-                // Add default welcome message if no history
+                console.log(`[CHAT HISTORY] No history found for user ${currentUserId}. Displaying welcome message.`);
                 chatHistory.push({
                     role: "assistant",
-                    content: "Welcome to the chatbot of MOA. Feel free to speak with Alice"
+                    content: "Welcome to the MOA chatbot! How can I help you today?"
                 });
             }
         } catch (error) {
-            console.error("Error loading chat history:", error);
-            // Add default welcome message on error
-            if (chatHistory.length === 0) {
-                chatHistory.push({
-                    role: "assistant",
-                    content: "Welcome to the chatbot of MOA. Feel free to speak with Alice"
-                });
-            }
+            console.error(`[CHAT HISTORY] Error loading chat history for user ${currentUserId}:`, error);
+            // Ensure a message is present even on error
+            chatHistory.push({
+                role: "assistant",
+                content: "Sorry, I couldn't load your chat history at the moment. Please try again later."
+            });
         } finally {
             chatHistoryLoaded.value = true;
+            // loading.value = false; // Reset general loading if it was set for history loading
         }
     });
 
@@ -1341,17 +1587,32 @@ const onTrack$ = $((event: RTCTrackEvent) => {
             // Ensure connection is ready
             if (!connected.value || !streamId.value || !sessionId.value) {
                 console.warn("Not connected, attempting to connect before talk...");
-                // await handleReconnectClick$(); // Attempt reconnect
-                // await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for potential connection
-
-                // if (!connected.value || !streamId.value || !sessionId.value) {
-                //     console.error("Connection failed, cannot create talk.");
-                //     connectionError.value = "Connection failed. Cannot play response.";
-                //     loading.value = false;
-                //     return;
-                // }
-                 console.error("Not connected, cannot create talk.");
-                 connectionError.value = "Not connected. Cannot play response.";
+                try {
+                    // First try reconnecting
+                    await connect$(); // Try to establish connection
+                    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for connection to establish
+                    
+                    // Check again if we're connected
+                    if (!connected.value || !streamId.value || !sessionId.value) {
+                        console.error("Connection failed after reconnect attempt, cannot create talk.");
+                        connectionError.value = "Connection failed. Cannot play response.";
+                        loading.value = false;
+                        return;
+                    }
+                    
+                    console.log("Successfully reconnected, proceeding with talk creation");
+                } catch (error) {
+                    console.error("Error during reconnection attempt:", error);
+                    connectionError.value = "Connection failed. Cannot play response.";
+                    loading.value = false;
+                    return;
+                }
+            }
+            
+            // Double check connection before proceeding
+            if (!connected.value || !streamId.value || !sessionId.value) {
+                console.error("Still not connected, cannot create talk.");
+                connectionError.value = "Not connected. Cannot play response.";
                  loading.value = false;
                  return; // Don't proceed if not connected
             }
@@ -1367,7 +1628,6 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                 // Reset detection variables
                 videoIsPlayingRef.value = false;
                 lastBytesReceivedRef.value = 0;
-                
                 // Clear any existing stats interval
                 if (statsIntervalIdRef.value) {
                     clearInterval(statsIntervalIdRef.value);
@@ -1376,7 +1636,7 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                 
                 // Add a more frequent check specifically for talk stream
                 const pc = peerConnectionRef.value;
-                statsIntervalIdRef.value = setInterval(() => {
+                statsIntervalIdRef.value = setInterval(async () => {
                     if (!pc || pc.connectionState !== 'connected') {
                         if (statsIntervalIdRef.value) {
                             clearInterval(statsIntervalIdRef.value);
@@ -1385,58 +1645,126 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                         return;
                     }
                     
-                    // Get all active tracks
-                    const receivers = pc.getReceivers();
-                    const activeVideoTracks = [];
-                    
-                    for (const receiver of receivers) {
-                        if (receiver.track &&
-                            receiver.track.kind === 'video' &&
-                            receiver.track.readyState === 'live') {
-                            activeVideoTracks.push(receiver.track);
-                        }
-                    }
-                    
-                    if (activeVideoTracks.length > 0) {
-                        console.log(`Found ${activeVideoTracks.length} active video tracks`);
-                        
-                        // Get all active tracks (video and audio)
-                        const allActiveTracks = receivers
-                            .filter((receiver: RTCRtpReceiver) => receiver.track && receiver.track.readyState === 'live')
+                    try {
+                        // Get all active tracks first
+                        const receivers = pc.getReceivers();
+                        const activeVideoTracks = receivers
+                            .filter((receiver: RTCRtpReceiver) => receiver.track &&
+                                   receiver.track.kind === 'video' &&
+                                   receiver.track.readyState === 'live')
                             .map((receiver: RTCRtpReceiver) => receiver.track);
                         
-                        // Create a new stream with all active tracks
-                        try {
-                            const mediaStream = new MediaStream(allActiveTracks);
+                        console.log(`Found ${activeVideoTracks.length} active video tracks`);
+                        
+                        // Only proceed with stats if we have video tracks
+                        if (activeVideoTracks.length > 0) {
+                            // Get detailed stats to check if we're receiving actual data
+                            const stats = await pc.getStats();
+                            let hasActiveVideoData = false;
+                            let currentBytesReceived = 0;
                             
-                            // Set directly to video element without stopping tracks
-                            const video = videoRef.value;
-                            if (video) {
-                                // Check if we need to update the video element
-                                const needsUpdate = !video.srcObject ||
-                                    (video.srcObject as MediaStream).getVideoTracks().length === 0 ||
-                                    (video.srcObject as MediaStream).getVideoTracks()[0].readyState !== 'live';
-                                
-                                if (needsUpdate) {
-                                    console.log("Updating video element with active stream");
+                            // Parse stats to check for active video data flow
+                            stats.forEach((report: RTCStats) => {
+                                if (report.type === 'inbound-rtp' &&
+                                    'mediaType' in report &&
+                                    report.mediaType === 'video') {
                                     
-                                    // Direct assignment without stopping tracks
-                                    video.srcObject = mediaStream;
-                                    video.muted = muteVideo.value;
-                                    video.style.display = 'block';
+                                    currentBytesReceived = 'bytesReceived' in report ?
+                                        report.bytesReceived as number : 0;
                                     
-                                    // Play the video
-                                    video.play().catch(e => {
-                                        console.error('Error playing video:', e);
-                                        if (e.name === 'NotAllowedError') {
-                                            video.muted = true;
-                                            video.play().catch(e2 => {
-                                                console.error('Still cannot play video:', e2);
-                                            });
-                                        }
+                                    // Check if bytes are increasing, indicating active data
+                                    hasActiveVideoData = currentBytesReceived > lastBytesReceivedRef.value &&
+                                                       currentBytesReceived > 0;
+                                    
+                                    if (hasActiveVideoData && !videoIsPlayingRef.value) {
+                                        console.log("Talk video stream now active with data flow");
+                                        videoIsPlayingRef.value = true;
+                                        
+                                        // Create fresh stream with all active tracks
+                                        const allActiveTracks = receivers
+                                            .filter((r: RTCRtpReceiver) => r.track && r.track.readyState === 'live')
+                                            .map((r: RTCRtpReceiver) => r.track);
+                                        
+                                        const refreshedStream = new MediaStream(allActiveTracks);
+                                        onVideoStatusChange$(true, refreshedStream);
+                                    }
+                                    
+                                    // Update for next comparison
+                                    lastBytesReceivedRef.value = currentBytesReceived;
+                                }
+                            });
+                            
+                            // Handle case where video should be playing but no data is flowing
+                            if (!hasActiveVideoData && videoIsPlayingRef.value && !loading.value) {
+                                console.log("Talk video stream has no active data flow, reverting to idle");
+                                videoIsPlayingRef.value = false;
+                                onVideoStatusChange$(false, null);
+                            }
+                        } else if (videoIsPlayingRef.value && !loading.value) {
+                            // No active video tracks but we think we're playing
+                            console.log("No active video tracks found, reverting to idle");
+                            videoIsPlayingRef.value = false;
+                            onVideoStatusChange$(false, null);
+                        }
+                    } catch (error) {
+                        console.error("Error monitoring video stream:", error);
+                    }
+                }, 750); // Slightly more frequent checking for smoother transitions
+                // Initial check for active tracks
+                const initialReceivers = pc.getReceivers();
+                const initialVideoTracks = initialReceivers
+                    .filter((receiver: RTCRtpReceiver) => receiver.track &&
+                            receiver.track.kind === 'video' &&
+                            receiver.track.readyState === 'live')
+                    .map((receiver: RTCRtpReceiver) => receiver.track);
+                
+                // Setup interval to check for talk stream activation
+                const talkStreamCheckInterval = setInterval(() => {
+                    if (initialVideoTracks.length > 0) {
+                        console.log(`Initial check: Found ${initialVideoTracks.length} active video tracks`);
+                    
+                    // Make sure all video tracks are enabled
+                    initialVideoTracks.forEach((track: MediaStreamTrack) => {
+                        console.log(`Ensuring video track is enabled: ${track.id}`);
+                        track.enabled = true;
+                    });
+                    
+                    // Get all active tracks (video and audio)
+                    const allActiveTracks = initialReceivers
+                        .filter((receiver: RTCRtpReceiver) => receiver.track && receiver.track.readyState === 'live')
+                        .map((receiver: RTCRtpReceiver) => receiver.track);
+                    
+                    // Create a new stream with all active tracks
+                    try {
+                        const mediaStream = new MediaStream(allActiveTracks);
+                        
+                        // Set directly to video element without stopping tracks
+                        const video = videoRef.value;
+                        if (video) {
+                            // Check if we need to update the video element
+                            const needsUpdate = !video.srcObject ||
+                                (video.srcObject as MediaStream).getVideoTracks().length === 0 ||
+                                (video.srcObject as MediaStream).getVideoTracks()[0].readyState !== 'live';
+                            if (needsUpdate) {
+                                console.log("Updating video element with active stream");
+                            
+                            // Direct assignment without stopping tracks
+                            video.srcObject = mediaStream;
+                            video.muted = muteVideo.value;
+                            video.style.display = 'block';
+                            
+                            // Play the video
+                            video.play().catch(e => {
+                                console.error('Error playing video:', e);
+                                if (e.name === 'NotAllowedError') {
+                                    video.muted = true;
+                                    video.play().catch(e2 => {
+                                        console.error('Still cannot play video:', e2);
                                     });
                                 }
+                            });
                             }
+                        }
                         } catch (err) {
                             console.error("Error creating media stream:", err);
                         }
@@ -1448,10 +1776,10 @@ const onTrack$ = $((event: RTCTrackEvent) => {
             console.error("Client: Error during startTalk:", error);
             chatHistory.push({ role: 'assistant', content: `Error: ${error.message || 'Could not process request.'}` });
             connectionError.value = `Error: ${error.message || 'Could not process request.'}`;
-             // Attempt to play idle video on error to reset visual state - Call QRL version
-             if (videoRef.value) { // Check ref directly
-                 playIdleVideo$();
-             }
+            // Attempt to play idle video on error to reset visual state
+            if (videoRef.value) {
+                playIdleVideo$();
+            }
         } finally {
             loading.value = false;
         }
@@ -1474,6 +1802,13 @@ const onTrack$ = $((event: RTCTrackEvent) => {
     // Define processAudio$ first, before it's used in event listeners
     const processAudio$ = $(async (audioBlob: Blob) => {
         loading.value = true; // Indicate processing
+        
+        // Mostrar mensaje de retroalimentación en la interfaz
+        chatHistory.push({
+            role: 'assistant',
+            content: `Procesando grabación de voz en ${getLanguageCode(formValues.language)} ${languageMap[formValues.language] || 'English'}...`
+        });
+        
         try {
             // Convert Blob to base64 string for easier serialization
             const arrayBuffer = await audioBlob.arrayBuffer();
@@ -1483,8 +1818,16 @@ const onTrack$ = $((event: RTCTrackEvent) => {
             );
             
             console.log("Client: Audio converted to base64, size:", base64Audio.length);
+            console.log(`Client: Processing voice recording in ${formValues.language} (${languageMap[formValues.language] || 'English'})`);
             
             // Send the base64 string to the server along with mime type
+            // Eliminar el último mensaje si es el de procesamiento
+            if (chatHistory.length > 0 &&
+                chatHistory[chatHistory.length - 1].role === 'assistant' &&
+                chatHistory[chatHistory.length - 1].content.startsWith('Procesando grabación de voz')) {
+                chatHistory.pop();
+            }
+            
             const transcription = await serverProcessAudio(
                 base64Audio,
                 audioBlob.type,  // Pass the mime type
@@ -1492,15 +1835,33 @@ const onTrack$ = $((event: RTCTrackEvent) => {
             );
 
             if (transcription && !transcription.startsWith("Error:")) {
-                // Add user message (transcription) and trigger AI response + talk
+                // Mostrar la transcripción antes de la respuesta
+                console.log(`Client: Transcription successful in ${formValues.language}: "${transcription}"`);
+                
+                // Añadir mensaje con la transcripción y desencadenar respuesta AI
                 await startTalk$(transcription);
             } else {
-                console.error("Transcription failed:", transcription);
-                chatHistory.push({ role: 'assistant', content: `Audio processing failed: ${transcription}` });
+                console.error(`Client: Transcription failed in ${formValues.language}:`, transcription);
+                
+                // Mensaje de error más detallado para el usuario
+                chatHistory.push({
+                    role: 'assistant',
+                    content: `No pude procesar correctamente el audio en ${languageMap[formValues.language] || 'English'}. Por favor, intenta de nuevo o escribe tu mensaje.`
+                });
             }
         } catch (error: any) {
-            console.error("Client: Error processing audio:", error);
-            chatHistory.push({ role: 'assistant', content: `Error processing audio: ${error.message}` });
+            console.error(`Client: Error processing audio in ${formValues.language}:`, error);
+            
+            // Eliminar el mensaje de procesamiento si existe
+            if (chatHistory.length > 0 &&
+                chatHistory[chatHistory.length - 1].role === 'assistant' &&
+                chatHistory[chatHistory.length - 1].content.startsWith('Procesando grabación de voz')) {
+                chatHistory.pop();
+            }
+            
+            // Mensaje de error más amigable y específico para el idioma
+            const errorMsg = `Lo siento, hubo un problema procesando tu grabación en ${getLanguageCode(formValues.language)} ${languageMap[formValues.language]}. ${error.message}`;
+            chatHistory.push({ role: 'assistant', content: errorMsg });
         } finally {
             loading.value = false;
         }
@@ -1510,8 +1871,31 @@ const onTrack$ = $((event: RTCTrackEvent) => {
         if (isRecording.value) return;
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' }); // Or other supported mimeType
+            // Configuración de audio optimizada para reconocimiento de voz
+            const audioConstraints = {
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    sampleRate: 48000
+                }
+            };
+            
+            console.log(`Client: Starting voice recording for language: ${formValues.language} (${languageMap[formValues.language] || 'English'})`);
+            
+            const stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+            
+            // Intentar usar audio/webm;codecs=opus para mejor calidad, con fallback a audio/webm
+            let mimeType = 'audio/webm;codecs=opus';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = 'audio/webm';
+                console.log('Client: Opus codec not supported, using standard audio/webm');
+            }
+            
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: mimeType,
+                audioBitsPerSecond: 128000
+            });
             recorderRef.value = noSerialize(mediaRecorder);
 
             const audioChunks: Blob[] = [];
@@ -1658,7 +2042,25 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                 {/* Control Panel - Minimalista como en la imagen */}
                 <div class="control-panel">
                     <div class="control-left">
-                        {/* Controls moved to chat input area */}
+                        {/* Language selection with country codes */}
+                        <div class="language-icons">
+                            {languages.map((option) => (
+                                <button
+                                    key={option.value}
+                                    onClick$={async () => {
+                                        formValues.language = option.value;
+                                        if (initialData.value?.userId) {
+                                            await serverUpdateUserLang(initialData.value.userId, option.value);
+                                        }
+                                    }}
+                                    class={`lang-icon-btn ${formValues.language === option.value ? 'active' : ''}`}
+                                    title={option.label}
+                                    aria-label={option.label}
+                                    dangerouslySetInnerHTML={option.flagSvg}
+                                >
+                                </button>
+                            ))}
+                        </div>
                     </div>
                     
                     <div class="control-right">
@@ -1676,12 +2078,7 @@ const onTrack$ = $((event: RTCTrackEvent) => {
             {/* Chat Panel - Limpio y elegante como en la imagen */}
             <div class="chat-panel">
                 {/* Header similar a la imagen */}
-                <div class="chat-header">
-                    <div class="chat-header-info">
-                        <div class="chat-title">Assistant</div>
-                        <div class="chat-subtitle">Welcome to the chatbot of MOA. Feel free to speak with Alice</div>
-                    </div>
-                </div>
+              
                 
                 {/* Mensajes de Chat */}
                 <div
@@ -1720,17 +2117,25 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                             {muteVideo.value ? <LuVolumeX class="w-4 h-4" /> : <LuVolume2 class="w-4 h-4" />}
                         </button>
                         
-                        <select
-                            name="language"
-                            value={formValues.language}
-                            onChange$={handleLanguageChange$}
-                            class="language-selector">
+                        {/* Language icons hidden on mobile (moved to top panel) */}
+                        <div class="language-icons desktop-only">
                             {languages.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {option.label}
-                                </option>
+                                <button
+                                    key={option.value}
+                                    onClick$={async () => {
+                                        formValues.language = option.value;
+                                        if (initialData.value?.userId) {
+                                            await serverUpdateUserLang(initialData.value.userId, option.value);
+                                        }
+                                    }}
+                                    class={`lang-icon-btn ${formValues.language === option.value ? 'active' : ''}`}
+                                    title={option.label}
+                                    aria-label={option.label}
+                                    dangerouslySetInnerHTML={option.flagSvg}
+                                >
+                                </button>
                             ))}
-                        </select>
+                        </div>
                         
                         <button
                             onClick$={toggleRecording$}
@@ -1826,11 +2231,7 @@ html, body {
   padding: 0;
   height: 100vh;
   width: 100vw;
-                </div>
-            </div>
-        </div>
-    );
-});
+}
 
 /* Estilos CSS para el nuevo diseño limpio y minimalista */
 /* Base Styles */
@@ -1876,13 +2277,19 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
+  padding: 8px 10px;
   background-color: rgba(255, 255, 255, 0.9);
 }
 
 .control-left, .control-right {
   display: flex;
   align-items: center;
+}
+
+/* Adjust language icons in control panel for mobile */
+.control-left .language-icons {
+  display: flex;
+  gap: 4px;
 }
 
 .volume-button {
@@ -2039,6 +2446,7 @@ html, body {
   display: flex;
   align-items: center;
   background-color: white;
+  width: 100%;
   border-radius: 24px;
   border: 1px solid #e0e0e0;
   padding: 0 6px;
@@ -2069,15 +2477,49 @@ html, body {
   cursor: pointer;
 }
 
-.language-selector {
-  height: 28px;
+.language-icons {
+  display: flex;
+  gap: 2px;
+  margin: 0 2px;
+}
+
+/* This space intentionally left blank - removing obsolete CSS */
+
+.lang-icon-btn {
+  width: 36px;
+  height: 36px;
   border: none;
   background: #f0f0f0;
-  border-radius: 14px;
-  padding: 0 8px;
-  margin: 0 4px;
-  font-size: 12px;
-  color: #333;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: transform 0.2s ease;
+}
+
+/* Control panel language icons should be slightly smaller */
+.control-left .lang-icon-btn {
+  width: 34px;
+  height: 24px;
+  border-radius: 3px;
+}
+
+.lang-icon-btn:hover {
+  transform: scale(1.05);
+}
+
+.lang-icon-btn.active {
+  box-shadow: 0 0 0 2px #1a85ff, 0 0 0 4px rgba(26, 133, 255, 0.3);
+}
+
+/* SVG flag styling */
+.lang-icon-btn svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .mic-button.recording {
@@ -2089,7 +2531,7 @@ html, body {
   flex-grow: 1;
   height: 100%;
   border: none;
-  padding: 0 12px;
+  padding: 0 8px;
   font-size: 14px;
 }
 
@@ -2098,6 +2540,7 @@ html, body {
 }
 
 .send-button {
+  min-width: 32px;
   width: 32px;
   height: 32px;
   display: flex;
@@ -2206,7 +2649,16 @@ html, body {
     position: relative;
     box-shadow: none;
   }
+  
+  /* Show language icons in input area only on desktop */
+  .desktop-only {
+    display: flex;
+  }
 }
+
+/* Hide on mobile */
+.desktop-only {
+  display: none;
 }
 
 /* Hide scrollbars but maintain functionality */
@@ -2221,7 +2673,6 @@ html, body {
 .chat-messages::-webkit-scrollbar-thumb {
   background: rgba(0,0,0,0.1);
   border-radius: 10px;
-}
   overflow: hidden;
 }
 

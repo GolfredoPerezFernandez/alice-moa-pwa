@@ -111,3 +111,29 @@ body {
 }
 
 /* Keep any other essential global styles below */
+
+/* Markdown content styling */
+.markdown-content strong {
+  font-weight: 700;
+  color: #000;
+}
+
+.dark .markdown-content strong {
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Markdown formatting */
+.markdown-content p {
+  margin-bottom: 0.5rem;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* Input area styling */
+textarea {
+  width: 100%;
+  min-width: 300px;
+}
