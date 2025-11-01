@@ -45,7 +45,7 @@ export default component$(() => {
             {/* Text content - Consistent center alignment */}
             <div class="w-full sm:flex-1 text-center order-1 sm:order-2">
               <h1 class="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 dark:text-white leading-tight">
-                <span class="block text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">Move On Academy</span>
+                <span class="block text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">Moa Academy</span>
                 <span class="block mt-1">Unlock Your Language Potential</span>
               </h1>
               <p class="mt-3 mt-4 mb-4 sm:mt-4 text-lg text-gray-600 dark:text-gray-300 leading-relaxed mx-auto max-w-lg">
@@ -75,7 +75,7 @@ export default component$(() => {
       <section class="py-12 px-4 sm:px-6 lg:py-16">
         <div class="max-w-7xl mx-auto">
           <div class="text-center mb-12">
-            <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Why Choose Move On Academy?</h2>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Why Choose Moa Academy?</h2>
             <p class="mt-4 text-xl text-gray-600 dark:text-gray-300">A modern approach to language learning designed for success.</p>
           </div>
 
@@ -137,7 +137,7 @@ export default component$(() => {
       {/* Footer */}
       <footer class="py-8 px-4 sm:px-6 bg-gray-100 dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800">
         <div class="max-w-7xl mx-auto text-center text-gray-500 dark:text-gray-400">
-          © {new Date().getFullYear()} Move On Academy. All rights reserved. |
+          © {new Date().getFullYear()} Moa Academy. All rights reserved. |
           <Link href="/terms" class="hover:text-teal-600 dark:hover:text-teal-400 ml-2">Terms</Link> |
           <Link href="/privacy" class="hover:text-teal-600 dark:hover:text-teal-400 ml-2">Privacy</Link>
         </div>
@@ -147,11 +147,11 @@ export default component$(() => {
 });
 
 export const head: DocumentHead = {
-  title: "Move On Academy - Learn Languages Effectively", // Updated Title
+  title: "Moa Academy - Learn Languages Effectively", // Updated Title
   meta: [
     {
       name: "description",
-      content: "Join Move On Academy to learn new languages with interactive courses, expert instructors, and an AI practice partner. Start your journey to fluency today!", // Updated Description
+  content: "Join Moa Academy to learn new languages with interactive courses, expert instructors, and an AI practice partner. Start your journey to fluency today!", // Updated Description
     },
   ],
 };

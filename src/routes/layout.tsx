@@ -102,7 +102,7 @@ export default component$(() => {
               </div>
               {/* Updated Brand Name and Gradient */}
               <span class="ml-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
-                Move On Academy
+                MOA Academy
               </span>
             </Link>
           </div>
