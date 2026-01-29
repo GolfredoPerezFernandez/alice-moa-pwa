@@ -27,9 +27,21 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- Password reset tokens
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          expires_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
       -- Create indexes for better performance
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
       CREATE INDEX IF NOT EXISTS idx_users_type ON users(type);
+      CREATE INDEX IF NOT EXISTS idx_reset_token_hash ON password_reset_tokens(token_hash);
+      CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
 
       -- Chat History Table
       CREATE TABLE IF NOT EXISTS chat_history (
@@ -56,6 +68,29 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
 
       -- Index for faster text chat history retrieval per user
       CREATE INDEX IF NOT EXISTS idx_text_chat_messages_user_id ON text_chat_messages(user_id);
+
+      -- Placement test attempts
+      CREATE TABLE IF NOT EXISTS placement_test_attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          full_name TEXT,
+          email TEXT,
+          phone TEXT,
+          country TEXT,
+          date_of_birth TEXT,
+          address TEXT,
+          answers_json TEXT NOT NULL,
+          auto_score INTEGER NOT NULL DEFAULT 0,
+          max_auto_score INTEGER NOT NULL DEFAULT 0,
+          level TEXT,
+          status TEXT NOT NULL DEFAULT 'submitted',
+          feedback_summary TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_placement_attempts_user ON placement_test_attempts(user_id);
     `;
     
     // Split the SQL into separate statements and execute them

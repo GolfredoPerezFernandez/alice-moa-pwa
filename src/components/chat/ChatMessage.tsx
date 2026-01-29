@@ -32,7 +32,7 @@ export default component$<ChatMessageProps>(({ message }) => {
         ) : (
           <div 
             class="whitespace-pre-wrap markdown-content" 
-            dangerouslySetInnerHTML={{ __html: formattedContent }}
+            dangerouslySetInnerHTML={formattedContent}
           />
         )}
       </div>

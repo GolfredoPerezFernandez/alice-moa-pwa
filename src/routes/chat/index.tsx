@@ -27,6 +27,13 @@ interface ChatMessage {
   timestamp?: string;
 }
 
+interface PlacementContext {
+  level: string | null;
+  autoScore: number | null;
+  maxAutoScore: number | null;
+  feedbackSummary: string | null;
+}
+
 // Maximum number of messages to keep in context window
 const MAX_CONTEXT_MESSAGES = 10;
 
@@ -116,6 +123,15 @@ const processTextForVoice = (text: string): string => {
     processed = processed.replace(/["']([^"']+)["']/g, "$1");
     processed = processed.replace(/\s+/g, " ").trim();
     return processed;
+};
+
+const sanitizeForPrompt = (text?: string | null, maxLength = 400): string => {
+    if (!text) return "";
+    return text
+        .replace(/[`]/g, "'")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, maxLength);
 };
 
 // --- Server Functions ---
@@ -325,7 +341,8 @@ const serverFetchLangChainResponse = server$(async function(
     userMessage: string,
     threadId: string,
     language: string,
-    chatHistory: ChatMessage[] = []
+    chatHistory: ChatMessage[] = [],
+    placementContext?: PlacementContext | null
 ) {
     console.log("Server: Fetching LangChain response for thread:", threadId);
     const openAIApiKey = this.env.get('OPENAI_API_KEY') || import.meta.env.OPENAI_API_KEY;
@@ -342,7 +359,75 @@ const serverFetchLangChainResponse = server$(async function(
             temperature: 0
         });
 
-        const systemContent = `You are a helpful assistant for MOVE ON ACADEMY, a Language Academy. Answer all questions to the best of your ability in ${language}.`;
+        const placementScoreText = placementContext?.autoScore !== null && placementContext?.autoScore !== undefined &&
+            placementContext?.maxAutoScore !== null && placementContext?.maxAutoScore !== undefined
+            ? ` (auto score ${placementContext?.autoScore}/${placementContext?.maxAutoScore})`
+            : '';
+        const placementInsight = placementContext?.level
+            ? `Placement insight: Latest MOA placement test indicates CEFR ${placementContext.level}${placementScoreText}. Coach from this baseline, celebrate strengths, and map the bridge to the next band.`
+            : 'Placement insight: No placement test on record yet. Invite the learner to share current evidence or to complete the MOA placement test so you can calibrate instruction.';
+        const placementFeedbackText = placementContext?.feedbackSummary
+            ? ` Recent academic feedback: ${sanitizeForPrompt(placementContext.feedbackSummary)}.`
+            : '';
+        const placementGuidance = `${placementInsight}${placementFeedbackText}`;
+
+        const systemContent = `Before we begin - REMEMBER THIS: methods, habits, structures, and routines matter, but always keep it fun. Metodo MOA thrives on joyful rigor and reflective teaching. Keep asking, "Does knowing a lot about a subject automatically make us good teachers?"
+
+Mission (MOA SCHOOL):
+- Serve children, teens, and adults inside an interactive, family-like, communicative environment that highlights human values and community.
+- Customize content per group, address particular needs, and use culture as a formative vehicle to help learners fall in love with the language.
+- Recognize that learning a new language is complex, so accompany students with empathy: "Estamos aqui para ensenarte, ayudarte y aprender contigo."
+
+Video reminder:
+- "The Big Bang Theory - Sheldon teaches Penny Physics" is your cautionary tale. Avoid monologues; lean into relational, balanced facilitation.
+
+Reflection axes to keep alive in every response: COMPETENCIAS | PERSONALIZADO | CULTURAL | COMUNICATIVO | MCER.
+
+${placementGuidance}
+
+Personalization:
+- Personalization is co-created by teacher and learner. Ask for aspirations, objectives, preferred themes, and relevant info; encourage students to own their learning.
+- Highlight positive traits to leverage and sensitive areas to strengthen; design assignments for home that extend practice and competence.
+- Repeat the mantra: "Conozca a sus estudiantes."
+
+Culture ("Link it"):
+- As Enrico Arcaini (1991) noted, language study is inseparable from culture. Use cultural references to connect prior and new knowledge ("Learn it -> Link it") and to build new neural pathways.
+- Promote values that create community while showing how culture makes the language meaningful.
+
+MCER quick map:
+- A1: Exchange everyday phrases, introduce oneself, request basic info when speech is slow and cooperative.
+- A2: Navigate frequent topics (family, shopping, work, places) with simple exchanges and short past descriptions.
+- B1: Grasp main points of clear speech/text on familiar matters, manage travel situations, narrate experiences, and justify opinions briefly.
+- B2: Understand complex concrete/abstract content, interact fluently with natives, craft detailed texts with pros/cons.
+- C1: Decode demanding texts, capture implicit meaning, express ideas fluently for social/academic/pro contexts with cohesive organization.
+- C2: Comprehend almost everything heard/read, synthesize diverse sources, and communicate with nuanced precision.
+
+Teaching style expectations:
+- Avoid authoritarian traits (dominance, intimidation, ridicule, rigid one-way delivery, emotional distance) and permissive traits (anything-goes ambiguity, blurred limits, poor observation, ignoring feedback).
+- Embody the equilibrado style: organized, differentiated, well-planned, self-possessed, strategy-rich, stimulating active participation, and fostering teacher-student communication.
+
+Metodo MOA structure (PPU / "I do, We do, You do, Extend it"):
+- Teacher-directed (I do / Presentation): deliver short segments, inductive teaching, retrieval practice, modeling, demonstrations, multimodal and real-life contexts.
+- Guided (We do / Practice): connect practice tightly to presentation, use worksheets, role-play, deduction, declarative + procedural systems, and corrective feedback.
+- Student-directed (You do / Use & Extend it): grant independence, act as guide-on-the-side, integrate problem/inquiry/exploratory/experiential work, WebQuests, cultural links, assignments for home, and "Extend it" opportunities for deeper dives.
+- Always articulate SWAT ("Students will be able to...") goals per activity and monitor progression from teacher-driven to student-driven protagonism.
+- Remember: executing PPU well is what makes a class truly MOA and keeps fun + learning in balance.
+
+Lesson-plan cues to confirm or request:
+- Teacher name, schedule, level, number of students, unit number, recommended time, main grammar focus.
+- Warm up -> Presentation -> Practice -> Use (and Extend It) description with activity modes (video, song, presentation, game, dialogue, role-play, other) plus comments and code (e.g., MOA/ACAD/0001).
+- Ensure cultural touchpoints, retrieval practice moments, and assignments are visible to learners.
+
+Guidelines:
+- Respond entirely in ${language} unless the learner explicitly requests a different language.
+- Tie every suggestion to competencies, personalization, culture, communication, and MCER outcomes; cite strategies like inductive teaching, retrieval practice, worksheets, role-play, problem-based learning, Learn it -> Link it, and home assignments.
+- Align explanations with the learner's placement level while nudging toward the next MCER band.
+- Encourage learners to share interests/goals and remind them that personalization relies on both teacher and student effort.
+- Provide actionable cultural links and next steps that gradually reduce teacher talk and increase student agency.
+- Keep a warm, organized, encouraging tone - never authoritarian, never permissive; be the supportive guide.
+- Avoid discussions about sexual content, violence, or religion; gently redirect to safe, pedagogical topics if prompted.
+
+Your goal is to help the learner progress through Metodo MOA with joy, rigor, and community, weaving competencies, personalization, culture, communication, and MCER alignment into every response.`;
         
         // Add system message if not already present in history
         const hasSystemMessage = chatHistory.some(msg => msg.role === 'system');
@@ -612,6 +697,12 @@ export const useInitialData = routeLoader$(async (requestEv) => {
     const session = requestEv.sharedMap.get('session');
     let userLanguage = 'en-US'; // Default
     let userId: string | undefined = undefined;
+    let placementContext: PlacementContext = {
+        level: null,
+        autoScore: null,
+        maxAutoScore: null,
+        feedbackSummary: null
+    };
 
     // First check for session.user.id
     if (session?.user?.id) {
@@ -670,6 +761,33 @@ export const useInitialData = routeLoader$(async (requestEv) => {
         } else {
             console.warn("[CHAT] Couldn't find chatbot language column in users table");
         }
+
+        try {
+            const placementResult = await client.execute({
+                sql: `SELECT level, auto_score, max_auto_score, feedback_summary
+                      FROM placement_test_attempts
+                      WHERE user_id = ?
+                      ORDER BY datetime(created_at) DESC
+                      LIMIT 1`,
+                args: [id]
+            });
+
+            if (placementResult.rows.length > 0) {
+                const placementRow = placementResult.rows[0] as any;
+                placementContext = {
+                    level: placementRow.level ? String(placementRow.level) : null,
+                    autoScore: placementRow.auto_score !== undefined && placementRow.auto_score !== null
+                        ? Number(placementRow.auto_score)
+                        : null,
+                    maxAutoScore: placementRow.max_auto_score !== undefined && placementRow.max_auto_score !== null
+                        ? Number(placementRow.max_auto_score)
+                        : null,
+                    feedbackSummary: placementRow.feedback_summary ? String(placementRow.feedback_summary) : null
+                };
+            }
+        } catch (placementError) {
+            console.warn(`[CHAT] Could not load placement context for user ${userId ?? 'unknown'}:`, placementError);
+        }
     } catch (e: any) { // Catch block for the DB query try
         console.error("[CHAT] Failed to load user language from DB:", e.message);
     } // Closing brace for try block
@@ -678,7 +796,8 @@ export const useInitialData = routeLoader$(async (requestEv) => {
         initialLanguage: userLanguage,
         userId: userId,
         // Generate initial thread ID here if not persisting per user
-        initialThreadId: crypto.randomUUID()
+        initialThreadId: crypto.randomUUID(),
+        placementContext
     };
 });
 
@@ -696,6 +815,7 @@ export default component$(() => {
     const initiating = useSignal(false);
     const loading = useSignal(false); // For AI response/talk generation
     const muteVideo = useSignal(false);
+    const avatarDisabled = useSignal(false);
     const connectionError = useSignal<string | null>(null);
     const isRecording = useSignal(false);
     const recordingTime = useSignal(0);
@@ -1345,6 +1465,10 @@ const onTrack$ = $((event: RTCTrackEvent) => {
     });
 
     const connect$ = $(async () => {
+        if (avatarDisabled.value) {
+            console.log("Avatar disabled, skipping connect");
+            return;
+        }
         if (connected.value || initiating.value) return; // Prevent multiple concurrent attempts
 
         initiating.value = true;
@@ -1428,7 +1552,9 @@ const onTrack$ = $((event: RTCTrackEvent) => {
         
         // Intento de conexión después de un retraso para asegurar que el DOM esté listo
         setTimeout(() => {
-            connect$();
+            if (!avatarDisabled.value) {
+                connect$();
+            }
         }, 1500);
 
         // Cleanup function when component unmounts
@@ -1440,6 +1566,20 @@ const onTrack$ = $((event: RTCTrackEvent) => {
              if (statsIntervalIdRef.value) clearInterval(statsIntervalIdRef.value);
              if (connectionTimeoutRef.value) clearTimeout(connectionTimeoutRef.value);
         });
+    });
+
+    // React to avatar toggle
+    useVisibleTask$(({ track }) => {
+        const disabled = track(() => avatarDisabled.value);
+        if (disabled) {
+            closePC$(true);
+            connected.value = false;
+            streamId.value = "";
+            sessionId.value = "";
+            connectionError.value = null;
+        } else if (!connected.value && !initiating.value) {
+            connect$();
+        }
     });
 
     // Load chat history on component initialization or when userId changes
@@ -1538,6 +1678,17 @@ const onTrack$ = $((event: RTCTrackEvent) => {
          connect$(); // Call the refactored connect QRL
     });
 
+    const toggleAvatar$ = $(() => {
+        avatarDisabled.value = !avatarDisabled.value;
+        if (avatarDisabled.value) {
+            closePC$(true);
+            connected.value = false;
+            streamId.value = "";
+            sessionId.value = "";
+            connectionError.value = null;
+        }
+    });
+
 
     const startTalk$ = $(async (userInput: string) => {
         if (!userInput.trim()) return;
@@ -1563,7 +1714,8 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                 userInput,
                 threadId.value,
                 languageMap[formValues.language] || 'English',
-                historyForLangChain
+                historyForLangChain,
+                initialData.value?.placementContext ?? null
             );
 
             // Add assistant message
@@ -1578,7 +1730,7 @@ const onTrack$ = $((event: RTCTrackEvent) => {
 
 
             // 3. Create D-ID Talk (if not muted and connected)
-            if (muteVideo.value) {
+            if (muteVideo.value || avatarDisabled.value) {
                 console.log("Video muted, skipping talk creation.");
                 loading.value = false;
                 return;
@@ -2064,11 +2216,21 @@ const onTrack$ = $((event: RTCTrackEvent) => {
                     </div>
                     
                     <div class="control-right">
+                        <label class="flex items-center gap-2 text-xs font-medium text-gray-700 mr-3">
+                            <input
+                                type="checkbox"
+                                class="h-4 w-4 accent-emerald-600"
+                                checked={avatarDisabled.value}
+                                onChange$={toggleAvatar$}
+                            />
+                            <span>{avatarDisabled.value ? 'Avatar OFF' : 'Avatar ON'}</span>
+                        </label>
                         {!connected.value && !initiating.value && (
                             <button
                                 onClick$={handleReconnectClick$}
-                                class="connect-button">
-                                Connect
+                                disabled={avatarDisabled.value}
+                                class={`connect-button ${avatarDisabled.value ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                {avatarDisabled.value ? 'Avatar off' : 'Connect'}
                             </button>
                         )}
                     </div>

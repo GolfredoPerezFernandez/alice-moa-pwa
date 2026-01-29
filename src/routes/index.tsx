@@ -1,6 +1,6 @@
 import { component$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
-import { Link } from "@builder.io/qwik-city";
+import { Link, routeLoader$ } from "@builder.io/qwik-city";
 import {
   LuBookOpen,      // For courses/learning
   LuGraduationCap, // For achievement/academy
@@ -9,10 +9,19 @@ import {
   LuArrowRight,
   LuMessageSquare, // For communication/chat
   LuSparkles,      // For features/benefits
-  LuCalendarDays   // For events/schedule
+  LuCalendarDays,  // For events/schedule
+  LuClipboardList  // For placement test CTA
 } from '@qwikest/icons/lucide';
+import { verifyAuth } from '~/utils/auth';
+
+export const useHomeAuthLoader = routeLoader$(async (requestEvent) => {
+  const isAuthenticated = await verifyAuth(requestEvent);
+  return { isAuthenticated };
+});
 
 export default component$(() => {
+  const auth = useHomeAuthLoader();
+
   return (
     <div class="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Hero Section */}
@@ -64,6 +73,13 @@ export default component$(() => {
                   class="px-4 sm:px-6 py-2 sm:py-3 rounded-lg bg-white dark:bg-gray-800 text-teal-600 dark:text-teal-400 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-gray-700 font-medium transition-colors shadow-sm hover:shadow-md text-sm sm:text-base"
                 >
                   Chat with Alice
+                </Link>
+                <Link
+                  href={auth.value?.isAuthenticated ? "/placement-test" : "/auth"}
+                  class="px-4 sm:px-6 py-2 sm:py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition-colors shadow-md hover:shadow-lg flex items-center text-sm sm:text-base"
+                >
+                  <LuClipboardList class="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
+                  Placement Test
                 </Link>
               </div>
             </div>

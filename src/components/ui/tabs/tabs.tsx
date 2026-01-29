@@ -5,15 +5,12 @@ import { cn } from '../utils';
 export const Tabs = {
   Root: component$<{
     class?: string;
-    defaultValue?: string;
-  }>(({
-    class: className,
-    defaultValue = "overview" // Add a default value
-  }) => {
+    selectedTabId?: string;
+  }>(({ class: className, selectedTabId }) => {
     return (
       <HeadlessTabs.Root
         class={cn('w-full', className)}
-        defaultValue={defaultValue} // This is needed for the tabs to work
+        selectedTabId={selectedTabId}
       >
         <Slot />
       </HeadlessTabs.Root>

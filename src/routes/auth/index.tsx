@@ -1,18 +1,87 @@
-import { component$, useSignal } from '@builder.io/qwik';
-import { routeLoader$, routeAction$, Form } from '@builder.io/qwik-city';
+import { component$, useSignal, useVisibleTask$, useStyles$ } from '@builder.io/qwik';
+import { server$, routeLoader$, routeAction$, Form } from '@builder.io/qwik-city';
+import { Resend } from 'resend';
 import { hashPassword, verifyPassword, setCookies, clearAuthCookies, getUserId } from '~/utils/auth';
 import { tursoClient } from '~/utils/turso';
 import { initAuthDatabase, checkDatabaseConnection } from '~/utils/init-db';
-import { 
-  LuArrowLeft, 
-  LuUser, 
-  LuLock, 
+import {
+  LuArrowLeft,
+  LuUser,
+  LuLock,
   LuMail,
   LuAlertCircle,
   LuCheckCircle,
   LuLoader,
   LuGraduationCap // Added for logo
 } from '@qwikest/icons/lucide';
+
+const generateResetToken = () => {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+const hashToken = async (token: string) => {
+  const data = new TextEncoder().encode(token)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(hashBuffer), (b) =>
+    b.toString(16).padStart(2, '0')
+  ).join('')
+}
+
+export const sendPasswordResetEmail = server$(async function (email: string) {
+  const resendApiKey = this.env.get('RESEND_API_KEY')
+  if (!resendApiKey) {
+    throw new Error('Resend API key not configured')
+  }
+
+  const client = tursoClient(this)
+
+  const userResult = await client.execute({
+    sql: 'SELECT id FROM users WHERE email = ?',
+    args: [email]
+  })
+  const user = userResult.rows[0]
+  if (!user?.id) {
+    console.log('[RESET] Email not found, returning success to avoid enumeration')
+    return { success: true }
+  }
+
+  const resend = new Resend(resendApiKey)
+  // Normalize origin to avoid double slashes in the link
+  const origin = (this.env.get('PUBLIC_APP_URL') || this.url.origin).replace(/\/+$/, '')
+  const senderEmail = this.env.get('SENDER_EMAIL') || 'onboarding@resend.dev'
+
+  const resetToken = generateResetToken()
+  const tokenHash = await hashToken(resetToken)
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+
+  await client.execute({
+    sql: 'DELETE FROM password_reset_tokens WHERE user_id = ?',
+    args: [user.id]
+  })
+
+  await client.execute({
+    sql: 'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+    args: [user.id, tokenHash, expiresAt]
+  })
+
+  const resetUrl = `${origin}/auth/reset-password?token=${resetToken}`
+
+  const { data, error } = await resend.emails.send({
+    from: senderEmail,
+    to: email,
+    subject: 'Recupera tu contrasena',
+    html: `<p>Haz clic en el siguiente enlace para restablecer tu contrasena (valido por 1 hora):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`
+  })
+
+  if (error) {
+    console.error('Resend error:', error)
+    throw new Error(error.message)
+  }
+
+  return { success: true, id: data?.id }
+})
 
 export const useLogout = routeAction$(async (data, requestEvent) => {
   try {
@@ -230,23 +299,109 @@ export default component$(() => {
   const checkEmailAction = useCheckEmail();
   const registerAction = useRegister();
   const loginAction = useLogin();
-  // Removed schoolsData and gradesData hooks
-  
+  // Recuperación de contraseña
+  const recoveryStep = useSignal(false);
+  const recoveryEmail = useSignal('');
+  const recoveryStatus = useSignal<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const recoveryError = useSignal('');
+  // ...existing code...
   const step = useSignal<'email' | 'password' | 'register'>('email');
   const email = useSignal('');
   const password = useSignal('');
   const errorMessage = useSignal('');
-  const isLoading = useSignal(false);
   const setupMessage = useSignal<string | null>(null);
 
-  if (tableSetup.value?.success) {
-    console.log('Tables initialized successfully');
-    setupMessage.value = 'Database ready';
-  } else if (tableSetup.value?.error) {
-    console.error('Database setup error:', tableSetup.value.error);
-    setupMessage.value = `Database Error: ${tableSetup.value.error}`;
-    errorMessage.value = tableSetup.value.error;
-  }
+  // Handle Email Check
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track }) => {
+    const result = track(() => checkEmailAction.value);
+    if (result?.success) {
+      step.value = result.isRegistered ? 'password' : 'register';
+      errorMessage.value = '';
+    } else if (result?.success === false) {
+      errorMessage.value = result.error || 'Failed to check email';
+    }
+  });
+
+  // Handle Login Error
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track }) => {
+    const result = track(() => loginAction.value);
+    if (result?.success === false) {
+      errorMessage.value = result.error || 'Login failed';
+    }
+  });
+
+  // Handle Register Error
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track }) => {
+    const result = track(() => registerAction.value);
+    if (result?.success === false) {
+      errorMessage.value = result.error || 'Registration failed';
+    }
+  });
+
+  // Handle Database Setup Messages
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track }) => {
+    const result = track(() => tableSetup.value);
+    if (result?.success) {
+      console.log('Tables initialized successfully');
+      setupMessage.value = 'Database ready';
+    } else if (result?.error) {
+      console.error('Database setup error:', result.error);
+      setupMessage.value = `Database Error: ${result.error}`;
+      errorMessage.value = result.error;
+    }
+  });
+
+  useStyles$(`
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes slide-up {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes float {
+      0% { transform: translate(0, 0); }
+      25% { transform: translate(5px, -15px); }
+      50% { transform: translate(10px, 0); }
+      75% { transform: translate(5px, 15px); }
+      100% { transform: translate(0, 0); }
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.05); }
+    }
+    
+    @keyframes fade-in {
+      0% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+    
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-box-shadow: 0 0 0px 1000px white inset !important;
+      box-shadow: 0 0 0px 1000px white inset !important;
+      border-color: #d1d5db !important;
+      transition: background-color 5000s ease-in-out 0s !important;
+    }
+    
+    .dark input:-webkit-autofill,
+    .dark input:-webkit-autofill:hover,
+    .dark input:-webkit-autofill:focus {
+      -webkit-box-shadow: 0 0 0px 1000px #374151 inset !important; /* Use gray-700 */
+      box-shadow: 0 0 0px 1000px #374151 inset !important; /* Use gray-700 */
+      border-color: #4B5563 !important;
+      -webkit-text-fill-color: #F3F4F6 !important;
+    }
+  `);
 
   return (
     // Use layout's background, this div is mainly for centering content
@@ -310,17 +465,6 @@ export default component$(() => {
             <Form 
               action={checkEmailAction} 
               class="space-y-6"
-              onSubmit$={() => {
-                // Loading state is now set in the button's onClick handler
-                // This ensures we show the loader immediately when clicked
-                if (checkEmailAction.value?.success) {
-                  step.value = checkEmailAction.value.isRegistered ? 'password' : 'register';
-                  email.value = (document.getElementById('email') as HTMLInputElement).value;
-                } else {
-                  errorMessage.value = checkEmailAction.value?.error || 'Failed to check email';
-                }
-                isLoading.value = false;
-              }}
             >
               <div class="space-y-2">
                 <label for="email" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -335,6 +479,8 @@ export default component$(() => {
                     name="email" 
                     type="email" 
                     required 
+                    value={email.value}
+                    onInput$={(e) => email.value = (e.target as HTMLInputElement).value}
                     class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
                     placeholder="you@example.com"
                   />
@@ -346,15 +492,10 @@ export default component$(() => {
 
               <button
                 type="submit"
-                disabled={isLoading.value}
-                onClick$={() => {
-                  // Set loading state immediately on button click
-                  isLoading.value = true;
-                  errorMessage.value = '';
-                }}
+                disabled={checkEmailAction.isRunning}
                 class="w-full flex justify-center items-center py-3 px-4 rounded-lg text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed" // Updated button gradient
               >
-                {isLoading.value ? (
+                {checkEmailAction.isRunning ? (
                   <span class="flex items-center">
                     <LuLoader class="animate-spin mr-2 h-5 w-5 text-white" />
                     Checking...
@@ -367,18 +508,10 @@ export default component$(() => {
           )}
 
           {/* Password Step (Login) */}
-          {step.value === 'password' && (
+          {step.value === 'password' && !recoveryStep.value && (
             <Form 
               action={loginAction} 
               class="space-y-6"
-              onSubmit$={() => {
-                // Loading state is now set in the button's onClick handler
-                // This ensures we show the loader immediately when clicked
-                if (!loginAction.value?.success) {
-                  errorMessage.value = loginAction.value?.error || 'Login failed';
-                }
-                isLoading.value = false;
-              }}
             >
               <input type="hidden" name="email" value={email.value} />
               <div class="space-y-2">
@@ -399,10 +532,9 @@ export default component$(() => {
                   />
                 </div>
                 <div class="flex justify-end">
-                  {/* TODO: Implement password reset - Updated link color */}
-                  <a href="#" class="text-sm text-teal-600 hover:text-teal-500 dark:text-teal-400 dark:hover:text-teal-300">
+                  <button type="button" class="text-sm text-teal-600 hover:text-teal-500 dark:text-teal-400 dark:hover:text-teal-300 underline" onClick$={() => { recoveryStep.value = true; }}>
                     Forgot password?
-                  </a>
+                  </button>
                 </div>
               </div>
 
@@ -421,15 +553,10 @@ export default component$(() => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isLoading.value}
-                  onClick$={() => {
-                    // Set loading state immediately on button click
-                    isLoading.value = true;
-                    errorMessage.value = '';
-                  }}
+                  disabled={loginAction.isRunning}
                   class="flex justify-center items-center py-2 px-6 rounded-lg text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed" // Updated button gradient
                 >
-                  {isLoading.value ? (
+                  {loginAction.isRunning ? (
                     <span class="flex items-center">
                       <LuLoader class="animate-spin mr-2 h-5 w-5 text-white" />
                       Signing in...
@@ -442,22 +569,75 @@ export default component$(() => {
             </Form>
           )}
 
+          {/* Password Recovery Step */}
+          {recoveryStep.value && (
+            <form class="space-y-6" preventdefault:submit onSubmit$={async (e) => {
+              e.preventDefault();
+              recoveryStatus.value = 'sending';
+              recoveryError.value = '';
+              try {
+                const email = recoveryEmail.value.trim();
+                if (!email) {
+                  recoveryError.value = 'Ingresa tu email.';
+                  recoveryStatus.value = 'idle';
+                  return;
+                }
+                // Llama a la función server$
+                const { sendPasswordResetEmail } = await import('./index');
+                await sendPasswordResetEmail(email);
+                recoveryStatus.value = 'sent';
+              } catch (err: any) {
+                recoveryError.value = err?.message || 'No se pudo enviar el email.';
+                recoveryStatus.value = 'error';
+              }
+            }}>
+              <div class="space-y-2">
+                <label htmlFor="recoveryEmail" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Ingresa tu email para recuperar tu contraseña
+                </label>
+                <input
+                  id="recoveryEmail"
+                  type="email"
+                  required
+                  value={recoveryEmail.value}
+                  onInput$={(e) => recoveryEmail.value = (e.target as HTMLInputElement).value}
+                  class="block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
+                  placeholder="you@example.com"
+                />
+              </div>
+              <div class="flex justify-between items-center">
+                <button type="button" onClick$={() => { recoveryStep.value = false; recoveryStatus.value = 'idle'; recoveryError.value = ''; }} class="flex items-center px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 text-sm">
+                  <LuArrowLeft class="mr-2 h-4 w-4" /> Volver
+                </button>
+                <button type="submit" disabled={recoveryStatus.value === 'sending'} class="flex justify-center items-center py-2 px-6 rounded-lg text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed">
+                  {recoveryStatus.value === 'sending' ? (
+                    <span class="flex items-center">
+                      <LuLoader class="animate-spin mr-2 h-5 w-5 text-white" />
+                      Enviando...
+                    </span>
+                  ) : (
+                    'Enviar recuperación'
+                  )}
+                </button>
+              </div>
+              {recoveryError.value && (
+                <div class="mt-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl">
+                  {recoveryError.value}
+                </div>
+              )}
+              {recoveryStatus.value === 'sent' && (
+                <div class="mt-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-xl">
+                  ¡Email enviado! Revisa tu bandeja de entrada.
+                </div>
+              )}
+            </form>
+          )}
+
           {/* Register Step */}
           {step.value === 'register' && (
             <Form 
               action={registerAction} 
               class="space-y-6"
-              onSubmit$={() => {
-                // Loading state is now set in the button's onClick handler
-                // This ensures we show the loader immediately when clicked
-                // Check if registerAction.value exists before accessing properties
-                const actionResult = registerAction.value;
-                // Check if actionResult exists and has the expected properties
-                if (actionResult && typeof actionResult === 'object' && 'success' in actionResult && !actionResult.success) {
-                  errorMessage.value = (actionResult && 'error' in actionResult && actionResult.error) ? String(actionResult.error) : 'Registration failed';
-                }
-                isLoading.value = false;
-              }}
             >
               <input type="hidden" name="email" value={email.value} />
               <div class="space-y-2">
@@ -517,15 +697,10 @@ export default component$(() => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isLoading.value}
-                  onClick$={() => {
-                    // Set loading state immediately on button click
-                    isLoading.value = true;
-                    errorMessage.value = '';
-                  }}
+                  disabled={registerAction.isRunning}
                   class="flex justify-center items-center py-2 px-6 rounded-lg text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 font-medium shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed" // Updated button gradient
                 >
-                  {isLoading.value ? (
+                  {registerAction.isRunning ? (
                     <span class="flex items-center">
                       <LuLoader class="animate-spin mr-2 h-5 w-5 text-white" />
                       Creating account...
@@ -581,53 +756,6 @@ export default component$(() => {
       </div>
 
       {/* Animations and styling */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        @keyframes slide-up {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        @keyframes float {
-          0% { transform: translate(0, 0); }
-          25% { transform: translate(5px, -15px); }
-          50% { transform: translate(10px, 0); }
-          75% { transform: translate(5px, 15px); }
-          100% { transform: translate(0, 0); }
-        }
-        
-        @keyframes pulse {
-          0%, 100% { opacity: 0.5; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.05); }
-        }
-        
-        @keyframes fade-in {
-          0% { opacity: 0; }
-          100% { opacity: 1; }
-        }
-        
-        input:-webkit-autofill,
-        input:-webkit-autofill:hover,
-        input:-webkit-autofill:focus {
-          -webkit-box-shadow: 0 0 0px 1000px white inset !important;
-          box-shadow: 0 0 0px 1000px white inset !important;
-          border-color: #d1d5db !important;
-          transition: background-color 5000s ease-in-out 0s !important;
-        }
-        
-        .dark input:-webkit-autofill,
-        .dark input:-webkit-autofill:hover,
-        .dark input:-webkit-autofill:focus {
-          -webkit-box-shadow: 0 0 0px 1000px #374151 inset !important; /* Use gray-700 */
-          box-shadow: 0 0 0px 1000px #374151 inset !important; /* Use gray-700 */
-          border-color: #4B5563 !important;
-          -webkit-text-fill-color: #F3F4F6 !important;
-        }
-      `}</style>
     </div>
   );
 });

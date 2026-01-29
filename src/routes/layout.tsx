@@ -1,4 +1,4 @@
-import { component$, Slot, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
+import { component$, Slot, useSignal, useVisibleTask$, $, useStyles$ } from '@builder.io/qwik';
 import { Link, routeLoader$, useLocation } from '@builder.io/qwik-city';
 // Directly import the loader from its source file
 import { useAuthCheck } from './auth-check';
@@ -10,6 +10,8 @@ import {
   LuMessageSquare, // For Chat
   LuGraduationCap, // Maybe for logo or About
   LuLanguages,     // General language icon
+  LuClipboardList, // Placement test
+  LuLayoutDashboard, // Dashboard link
   LuLogIn,         // For Login
   LuLogOut,        // For Logout
   LuMenu,          // Mobile menu
@@ -17,7 +19,9 @@ import {
   LuSun,           // Light mode
   LuMoon           // Dark mode
 } from '@qwikest/icons/lucide';
-import { verifyAuth } from '~/utils/auth';
+import { verifyAuth, getUserId } from '~/utils/auth';
+import { tursoClient } from '~/utils/turso';
+import { isDashboardAdmin } from '~/constants/dashboard';
 
 // Define the auth loader directly within the layout
 export const useLayoutAuthLoader = routeLoader$(async (requestEvent) => {
@@ -27,15 +31,35 @@ export const useLayoutAuthLoader = routeLoader$(async (requestEvent) => {
   try {
     // We only need the boolean status for the layout's conditional rendering
     const isAuthenticated = await verifyAuth(requestEvent); // Verify using the cookie
+    const userId = getUserId(requestEvent);
+    let userEmail: string | null = null;
+    let canAccessDashboard = false;
+
+    if (isAuthenticated && userId) {
+      try {
+        const client = tursoClient(requestEvent);
+        const result = await client.execute({
+          sql: 'SELECT email FROM users WHERE id = ? LIMIT 1',
+          args: [userId],
+        });
+        if (result.rows.length > 0) {
+          userEmail = result.rows[0].email as string | null;
+          canAccessDashboard = isDashboardAdmin(userEmail);
+        }
+      } catch (error) {
+        console.error('[Layout Loader] Failed to load user email', error);
+      }
+    }
+
     console.log(`[Layout Loader] Is Authenticated: ${isAuthenticated}`);
     // Return only the necessary boolean value
-    return { isAuthenticated };
+    return { isAuthenticated, userEmail, canAccessDashboard };
   } catch (error) {
     // Handle potential errors during verification, though verifyAuth might handle redirects
     console.error('[Layout Loader] Error checking auth:', error);
     // Return unauthenticated state on error, but don't redirect from here
     // Redirects for protected routes should happen in their specific loaders if needed
-    return { user_id: null, isAuthenticated: false };
+    return { user_id: null, isAuthenticated: false, canAccessDashboard: false, userEmail: null };
   }
 });
 
@@ -88,6 +112,32 @@ export default component$(() => {
     console.log('[Layout Client] Auth State:', auth.value);
     console.log('[Layout Client] isAuthenticated:', auth.value?.isAuthenticated);
   });
+
+  useStyles$(`
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .animate-slideDown {
+      animation: slideDown 0.2s ease-out;
+    }
+    
+    /* Hide scrollbars but keep functionality */
+    .scrollbar-hide {
+      -ms-overflow-style: none;  /* IE and Edge */
+      scrollbar-width: none;  /* Firefox */
+    }
+    
+    .scrollbar-hide::-webkit-scrollbar {
+      display: none;  /* Chrome, Safari and Opera */
+    }
+    
+    html, body {
+      overscroll-behavior: none;
+    }
+  `);
+
   return (
     <div class="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
       {/* Top Navigation Bar */}
@@ -168,21 +218,38 @@ export default component$(() => {
                     <span>Chat</span>
                   </div>
                 </Link>
-                
-                {/* Link to Text-only Chat */}
+
+                {/* Placement test */}
                 <Link
-                  href="/text-chat"
+                  href="/placement-test"
                   class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/text-chat')
+                    isActive('/placement-test')
                       ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
                       : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
                   }`}
                 >
                   <div class="flex items-center">
-                    <LuMessageSquare class="w-5 h-5 mr-1.5" />
-                    <span>Text Chat</span>
+                    <LuClipboardList class="w-5 h-5 mr-1.5" />
+                    <span>Placement</span>
                   </div>
                 </Link>
+
+                {auth.value?.canAccessDashboard && (
+                  <Link
+                    href="/dashboard"
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/dashboard')
+                        ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <div class="flex items-center">
+                      <LuLayoutDashboard class="w-5 h-5 mr-1.5" />
+                      <span>Dashboard</span>
+                    </div>
+                  </Link>
+                )}
+               
                 
                 {/* Add other relevant links if needed, e.g., Admin panel for admin users */}
                 <Link
@@ -312,22 +379,42 @@ export default component$(() => {
                     <span>Chat</span>
                   </div>
                 </Link>
-                
-                {/* Link to Text-only Chat (Mobile) */}
+
+                {/* Placement test (Mobile) */}
                 <Link
-                  href="/text-chat"
+                  href="/placement-test"
                   class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                    isActive('/text-chat')
+                    isActive('/placement-test')
                       ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
                       : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
                   }`}
                   onClick$={() => (isMobileMenuOpen.value = false)}
                 >
                   <div class="flex items-center">
-                    <LuMessageSquare class="w-5 h-5 mr-3" />
-                    <span>Text Chat</span>
+                    <LuClipboardList class="w-5 h-5 mr-3" />
+                    <span>Placement</span>
                   </div>
                 </Link>
+
+                {auth.value?.canAccessDashboard && (
+                  <Link
+                    href="/dashboard"
+                    class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                      isActive('/dashboard')
+                        ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                    onClick$={() => (isMobileMenuOpen.value = false)}
+                  >
+                    <div class="flex items-center">
+                      <LuLayoutDashboard class="w-5 h-5 mr-3" />
+                      <span>Dashboard</span>
+                    </div>
+                  </Link>
+                )}
+                
+                {/* Link to Text-only Chat (Mobile) */}
+               
                 
                 {/* Add other relevant links if needed */}
                 <Link
@@ -395,30 +482,6 @@ export default component$(() => {
       )}
 
       {/* Custom animations and styles */}
-      <style>{`
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .animate-slideDown {
-          animation: slideDown 0.2s ease-out;
-        }
-        
-        /* Hide scrollbars but keep functionality */
-        .scrollbar-hide {
-          -ms-overflow-style: none;  /* IE and Edge */
-          scrollbar-width: none;  /* Firefox */
-        }
-        
-        .scrollbar-hide::-webkit-scrollbar {
-          display: none;  /* Chrome, Safari and Opera */
-        }
-        
-        html, body {
-          overscroll-behavior: none;
-        }
-      `}</style>
     </div>
   );
   

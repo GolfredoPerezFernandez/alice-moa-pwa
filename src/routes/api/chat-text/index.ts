@@ -1,7 +1,8 @@
-import {  $ } from "@builder.io/qwik";
-import { routeLoader$, routeAction$, zod$, z } from '@builder.io/qwik-city';
+import { $ } from '@builder.io/qwik';
 import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
+import type { MessageContent } from "@langchain/core/messages";
+import type { RequestEvent } from '@builder.io/qwik-city';
 import { getUserId } from "~/utils/auth";
 import { tursoClient } from "~/utils/turso";
 
@@ -14,16 +15,25 @@ interface ChatMessage {
 // Maximum number of messages to keep in context window
 const MAX_CONTEXT_MESSAGES = 10;
 
+const serializeMessageContent = (content: string | MessageContent | MessageContent[]): string => {
+  if (typeof content === 'string') return content;
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content ?? '');
+  }
+};
+
 // API endpoint for text-only chat
-export const onPost = $(async (requestEvent) => {
+export const onPost = $(async (requestEvent: RequestEvent) => {
   try {
     // Check authentication
     const userId = getUserId(requestEvent);
     if (!userId) {
-      return requestEvent.json(
-        { success: false, error: "Authentication required" },
-        { status: 401 }
-      );
+      return requestEvent.json(401, {
+        success: false,
+        error: "Authentication required"
+      });
     }
 
     // Get request body
@@ -31,19 +41,19 @@ export const onPost = $(async (requestEvent) => {
     const { message, formatResponse = true } = body;
 
     if (!message) {
-      return requestEvent.json(
-        { success: false, error: "Message is required" },
-        { status: 400 }
-      );
+      return requestEvent.json(400, {
+        success: false,
+        error: "Message is required"
+      });
     }
 
     // Get OpenAI API key
     const openaiApiKey = requestEvent.env.get('OPENAI_API_KEY') || import.meta.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
-      return requestEvent.json(
-        { success: false, error: "OpenAI API key is not configured" },
-        { status: 500 }
-      );
+      return requestEvent.json(500, {
+        success: false,
+        error: "OpenAI API key is not configured"
+      });
     }
 
     // Initialize database client
@@ -72,7 +82,7 @@ export const onPost = $(async (requestEvent) => {
       // Save system message to database
       await client.execute({
         sql: `INSERT INTO text_chat_messages (user_id, role, content) VALUES (?, ?, ?)`,
-        args: [userId, 'system', systemMessage.content]
+        args: [userId, 'system', serializeMessageContent(systemMessage.content)]
       });
     } else {
       // Add existing messages (reversed to maintain chronological order)
@@ -129,9 +139,7 @@ export const onPost = $(async (requestEvent) => {
     const response = await model.invoke(messages);
     
     // Ensure we handle non-string content (could be MessageContentComplex[])
-    const assistantMessage = typeof response.content === 'string' 
-      ? response.content 
-      : JSON.stringify(response.content);
+    const assistantMessage: string = serializeMessageContent(response.content);
 
     // Save assistant message to database
     await client.execute({
@@ -140,15 +148,15 @@ export const onPost = $(async (requestEvent) => {
     });
 
     // Return success response
-    return requestEvent.json({
+    return requestEvent.json(200, {
       success: true,
       message: assistantMessage
     });
   } catch (error) {
     console.error("Error in chat-text API:", error);
-    return requestEvent.json({
+    return requestEvent.json(500, {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred"
-    }, { status: 500 });
+    });
   }
 });
