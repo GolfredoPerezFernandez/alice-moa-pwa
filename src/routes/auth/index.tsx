@@ -141,7 +141,7 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
       sql: 'SELECT COUNT(*) as count FROM users',
       args: []
     });
-    
+
     const isFirstUser = firstUserCheck.rows.length > 0 && firstUserCheck.rows[0].count === 0;
     // Assign userType here, inside the try block after checking isFirstUser
     // Declare variables at the start of the try block
@@ -149,18 +149,18 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
     let userType: 'admin' | 'normal';
 
     userType = isFirstUser ? 'admin' : 'normal'; // Assign userType here
-    
+
     // Use executeQuery directly for transaction operations to handle them properly
     // We'll store user ID from the result
     // Removed duplicate declarations
-    
+
     // First create the user without a transaction for the first part
     // Insert user with name if provided
     const sql = fullName
       ? 'INSERT INTO users (email, password_hash, type, name) VALUES (?, ?, ?, ?)'
       : 'INSERT INTO users (email, password_hash, type) VALUES (?, ?, ?)';
     const args = fullName ? [email, passwordHash, userType, fullName.trim()] : [email, passwordHash, userType];
-    
+
     const result = await client.execute({ sql, args });
     // Removed extra closing parenthesis
 
@@ -169,9 +169,9 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
     if (!userId) {
       throw new Error("Registration failed: userId is undefined");
     }
-    
+
     // Removed student record creation logic
-    
+
     // Use the utility function to set cookies
     // Ensure userId is treated as string/number compatible with setCookies if needed
     const userIdString = String(userId);
@@ -199,26 +199,26 @@ export const useRegister = routeAction$(async (data, requestEvent) => {
 export const useLogin = routeAction$(async (data, requestEvent) => {
   const client = tursoClient(requestEvent);
   const { email, password } = data as { email: string; password: string };
-  
+
   try {
     const result = await client.execute({
       sql: 'SELECT * FROM users WHERE email = ?',
       args: [email]
     });
-    
+
     const user = result.rows[0];
     if (!user || typeof user.password_hash !== 'string' || !user.id) {
       return { success: false, error: 'Invalid user data' };
     }
-    
+
     const isValid = await verifyPassword(password, user.password_hash);
     if (!isValid) {
       return { success: false, error: 'Invalid password' };
     }
-    
+
     // Convert user.id to string to avoid type issues
     const userIdString = String(user.id);
-    
+
     await client.execute({
       sql: 'UPDATE users SET session_expires = ? WHERE id = ?',
       args: [new Date(Date.now() + 60 * 60 * 1000), userIdString]
@@ -230,15 +230,15 @@ export const useLogin = routeAction$(async (data, requestEvent) => {
       : (user.type === 'coordinator')
         ? 'coordinator'
         : 'normal';
-    
+
     // Use the utility function to set cookies
     setCookies(requestEvent, userIdString, userType);
-    
+
     // Redirect after login - Admin to home (or future admin panel), others to marketplace
     if (userType === 'admin') {
-       requestEvent.redirect(302, '/'); // Or '/admin' if created
+      requestEvent.redirect(302, '/'); // Or '/admin' if created
     } else {
-       requestEvent.redirect(302, '/chat'); // Redirect normal users to the chat
+      requestEvent.redirect(302, '/chat'); // Redirect normal users to the chat
     }
     return { success: true };
   } catch (error) {
@@ -250,7 +250,7 @@ export const useLogin = routeAction$(async (data, requestEvent) => {
 // Initialize the database for authentication
 export const useTableSetup = routeLoader$(async (requestEvent) => {
   console.log('[AUTH-SETUP] Starting database setup');
-  
+
   try {
     // First check if we can connect to the database
     const connectionCheck = await checkDatabaseConnection(requestEvent);
@@ -262,7 +262,7 @@ export const useTableSetup = routeLoader$(async (requestEvent) => {
         details: connectionCheck.message
       };
     }
-    
+
     // Initialize the auth tables
     const initResult = await initAuthDatabase(requestEvent);
     if (!initResult.success) {
@@ -273,11 +273,11 @@ export const useTableSetup = routeLoader$(async (requestEvent) => {
         details: initResult.message
       };
     }
-    
+
     // Check if we already have a logged in user
     const user_id = getUserId(requestEvent);
     console.log(`[AUTH-SETUP] Current user ID: ${user_id || 'none'}`);
-    
+
     console.log('[AUTH-SETUP] Database setup completed successfully');
     return {
       success: true,
@@ -413,7 +413,7 @@ export default component$(() => {
         <div class="w-3 h-3 bg-teal-400/50 dark:bg-teal-300/40 rounded-full absolute top-[20%] left-[35%] animate-[pulse_4s_infinite]"></div>
         <div class="w-2 h-2 bg-green-400/50 dark:bg-green-300/40 rounded-full absolute top-[60%] left-[70%] animate-[pulse_5s_infinite]" style="animation-delay: 0.7s;"></div>
         {/* Removed redundant floating shapes defined in layout */}
-        
+
         {/* Show setup message if any */}
         {setupMessage.value && (
           <div class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-blue-50 border border-blue-200 text-blue-800 rounded-md px-4 py-2 text-sm max-w-xs text-center z-50">
@@ -429,8 +429,8 @@ export default component$(() => {
           <div class="relative">
             {/* Updated Logo Icon - Teal/Green */}
             <div class="w-10 h-10 rounded-full bg-gradient-to-br from-teal-500 to-green-500 flex items-center justify-center text-white shadow-lg">
-               {/* Using LuGraduationCap consistent with layout */}
-               <LuGraduationCap class="w-6 h-6" />
+              {/* Using LuGraduationCap consistent with layout */}
+              <LuGraduationCap class="w-6 h-6" />
             </div>
           </div>
           <div class="ml-2 flex flex-col">
@@ -450,20 +450,20 @@ export default component$(() => {
             {/* Updated Header Gradient - Teal/Green */}
             <h2 class="text-3xl font-bold mb-3 text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
               {step.value === 'email' ? 'Welcome Back!' :
-              step.value === 'password' ? 'Sign In' :
-              'Join Move On Academy'}
+                step.value === 'password' ? 'Sign In' :
+                  'Join Move On Academy'}
             </h2>
             <p class="text-gray-600 dark:text-gray-300">
               {step.value === 'email' ? 'Enter your email to continue' :
-              step.value === 'password' ? `Signing in as ${email.value}` :
-              `Complete registration for ${email.value}`}
+                step.value === 'password' ? `Signing in as ${email.value}` :
+                  `Complete registration for ${email.value}`}
             </p>
           </div>
 
           {/* Email Step */}
           {step.value === 'email' && (
-            <Form 
-              action={checkEmailAction} 
+            <Form
+              action={checkEmailAction}
               class="space-y-6"
             >
               <div class="space-y-2">
@@ -474,11 +474,11 @@ export default component$(() => {
                   <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                     <LuMail class="h-5 w-5 text-gray-400 dark:text-gray-500" />
                   </div>
-                  <input 
-                    id="email" 
-                    name="email" 
-                    type="email" 
-                    required 
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    required
                     value={email.value}
                     onInput$={(e) => email.value = (e.target as HTMLInputElement).value}
                     class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
@@ -509,8 +509,8 @@ export default component$(() => {
 
           {/* Password Step (Login) */}
           {step.value === 'password' && !recoveryStep.value && (
-            <Form 
-              action={loginAction} 
+            <Form
+              action={loginAction}
               class="space-y-6"
             >
               <input type="hidden" name="email" value={email.value} />
@@ -522,10 +522,10 @@ export default component$(() => {
                   <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                     <LuLock class="h-5 w-5 text-gray-400 dark:text-gray-500" />
                   </div>
-                  <input 
-                    id="password" 
-                    name="password" 
-                    type="password" 
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
                     required
                     class="pl-10 block w-full rounded-lg border-0 py-3 text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-700 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-teal-600 dark:focus:ring-teal-500 bg-white dark:bg-gray-700"
                     placeholder="••••••••"
@@ -539,7 +539,7 @@ export default component$(() => {
               </div>
 
               <div class="flex justify-between items-center">
-                <button 
+                <button
                   type="button"
                   onClick$={() => {
                     step.value = 'email';
@@ -635,8 +635,8 @@ export default component$(() => {
 
           {/* Register Step */}
           {step.value === 'register' && (
-            <Form 
-              action={registerAction} 
+            <Form
+              action={registerAction}
               class="space-y-6"
             >
               <input type="hidden" name="email" value={email.value} />
@@ -683,7 +683,7 @@ export default component$(() => {
               </div>
 
               <div class="flex justify-between items-center">
-                <button 
+                <button
                   type="button"
                   onClick$={() => {
                     step.value = 'email';

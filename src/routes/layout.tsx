@@ -73,14 +73,14 @@ export default component$(() => {
 
   // Check if path matches the active route
   const isActive = (path: string) => {
-    return location.url.pathname.startsWith(path);
+    return location.url.pathname === path || location.url.pathname.startsWith(path + '/');
   };
 
   // Toggle dark mode
   useVisibleTask$(() => {
     const prefersDark = document.documentElement.classList.contains('dark');
     isDarkMode.value = prefersDark;
-    
+
     // Check if we're on marketplace pages
     isMarketplacePage.value = location.url.pathname.startsWith('/marketplace');
   });
@@ -163,11 +163,10 @@ export default component$(() => {
             {/* Common Links (visible to all) */}
             <Link
               href="/"
-              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                location.url.pathname === '/' // Exact match for home
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
+              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${location.url.pathname === '/' // Exact match for home
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
             >
               <div class="flex items-center">
                 <LuHome class="w-5 h-5 mr-1.5" />
@@ -176,11 +175,10 @@ export default component$(() => {
             </Link>
             <Link
               href="/courses" // Example courses link
-              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                isActive('/courses')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
+              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive('/courses')
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
             >
               <div class="flex items-center">
                 <LuBookOpen class="w-5 h-5 mr-1.5" />
@@ -189,29 +187,27 @@ export default component$(() => {
             </Link>
             <Link
               href="/about" // Keep About link
-              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                isActive('/about')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
+              class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive('/about')
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
             >
               <div class="flex items-center">
                 <LuUsers class="w-5 h-5 mr-1.5" />
                 <span>About</span>
               </div>
             </Link>
-            
+
             {/* Authenticated-only links */}
             {auth.value?.isAuthenticated && (
               <>
                 {/* Link to the Chat */}
                 <Link
                   href="/chat" // Keep Chat link
-                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/chat')
-                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300' // Updated active colors
-                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-                  }`}
+                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive('/chat')
+                    ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300' // Updated active colors
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
                 >
                   <div class="flex items-center">
                     <LuMessageSquare class="w-5 h-5 mr-1.5" /> {/* Keep chat icon */}
@@ -222,26 +218,36 @@ export default component$(() => {
                 {/* Placement test */}
                 <Link
                   href="/placement-test"
-                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/placement-test')
-                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-                  }`}
+                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive('/placement-test')
+                    ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
                 >
                   <div class="flex items-center">
                     <LuClipboardList class="w-5 h-5 mr-1.5" />
                     <span>Placement</span>
                   </div>
                 </Link>
-
+                {/* Placement test */}
+                <Link
+                  href="/placement-test-after"
+                  class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive('/placement-test-after')
+                    ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
+                >
+                  <div class="flex items-center">
+                    <LuClipboardList class="w-5 h-5 mr-1.5" />
+                    <span>Placement After</span>
+                  </div>
+                </Link>
                 {auth.value?.canAccessDashboard && (
                   <Link
                     href="/dashboard"
-                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive('/dashboard')
-                        ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-                    }`}
+                    class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive('/dashboard')
+                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                      }`}
                   >
                     <div class="flex items-center">
                       <LuLayoutDashboard class="w-5 h-5 mr-1.5" />
@@ -249,8 +255,8 @@ export default component$(() => {
                     </div>
                   </Link>
                 )}
-               
-                
+
+
                 {/* Add other relevant links if needed, e.g., Admin panel for admin users */}
                 <Link
                   href="/auth/logout"
@@ -263,7 +269,7 @@ export default component$(() => {
                 </Link>
               </>
             )}
-            
+
             {/* Login link for unauthenticated users */}
             {!auth.value?.isAuthenticated && (
               <Link
@@ -276,7 +282,7 @@ export default component$(() => {
                 </div>
               </Link>
             )}
-            
+
             {/* Dark mode toggle (visible to all) */}
             <button
               onClick$={toggleDarkMode}
@@ -300,7 +306,7 @@ export default component$(() => {
                 <LuMenu class="w-6 h-6" />
               )}
             </button>
-            
+
             {/* Dark mode toggle on mobile */}
             <button
               onClick$={toggleDarkMode}
@@ -320,11 +326,10 @@ export default component$(() => {
             {/* Common Links (visible to all) - Mobile */}
             <Link
               href="/"
-              class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                location.url.pathname === '/'
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
+              class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${location.url.pathname === '/'
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
               onClick$={() => (isMobileMenuOpen.value = false)}
             >
               <div class="flex items-center">
@@ -334,11 +339,10 @@ export default component$(() => {
             </Link>
             <Link
               href="/courses"
-              class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                isActive('/courses')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
+              class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${isActive('/courses')
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
               onClick$={() => (isMobileMenuOpen.value = false)}
             >
               <div class="flex items-center">
@@ -348,11 +352,10 @@ export default component$(() => {
             </Link>
             <Link
               href="/about"
-              class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                isActive('/about')
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-              }`}
+              class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${isActive('/about')
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                }`}
               onClick$={() => (isMobileMenuOpen.value = false)}
             >
               <div class="flex items-center">
@@ -360,18 +363,17 @@ export default component$(() => {
                 <span>About</span>
               </div>
             </Link>
-            
+
             {/* Authenticated-only links */}
             {auth.value?.isAuthenticated && (
               <>
                 {/* Link to the Chat */}
                 <Link
                   href="/chat"
-                  class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                    isActive('/chat')
-                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300' // Updated active colors
-                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-                  }`}
+                  class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${isActive('/chat')
+                    ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300' // Updated active colors
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
                   onClick$={() => (isMobileMenuOpen.value = false)}
                 >
                   <div class="flex items-center">
@@ -383,11 +385,10 @@ export default component$(() => {
                 {/* Placement test (Mobile) */}
                 <Link
                   href="/placement-test"
-                  class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                    isActive('/placement-test')
-                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-                  }`}
+                  class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${isActive('/placement-test')
+                    ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                    }`}
                   onClick$={() => (isMobileMenuOpen.value = false)}
                 >
                   <div class="flex items-center">
@@ -399,11 +400,10 @@ export default component$(() => {
                 {auth.value?.canAccessDashboard && (
                   <Link
                     href="/dashboard"
-                    class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                      isActive('/dashboard')
-                        ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
-                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
-                    }`}
+                    class={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${isActive('/dashboard')
+                      ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300'
+                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                      }`}
                     onClick$={() => (isMobileMenuOpen.value = false)}
                   >
                     <div class="flex items-center">
@@ -412,10 +412,10 @@ export default component$(() => {
                     </div>
                   </Link>
                 )}
-                
+
                 {/* Link to Text-only Chat (Mobile) */}
-               
-                
+
+
                 {/* Add other relevant links if needed */}
                 <Link
                   href="/auth/logout"
@@ -460,7 +460,7 @@ export default component$(() => {
               <div class="flex items-center mb-4 md:mb-0">
                 {/* Updated Footer Logo */}
                 <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-500 to-green-500 flex items-center justify-center text-white shadow">
-                   <LuGraduationCap class="w-5 h-5" />
+                  <LuGraduationCap class="w-5 h-5" />
                 </div>
                 {/* Updated Footer Brand Name */}
                 <span class="ml-2 text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400">
@@ -484,5 +484,5 @@ export default component$(() => {
       {/* Custom animations and styles */}
     </div>
   );
-  
+
 }); // End of component$

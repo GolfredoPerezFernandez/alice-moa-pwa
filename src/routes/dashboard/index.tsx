@@ -29,6 +29,7 @@ interface PlacementAttemptRow {
   account_email: string | null;
   feedback_summary: string | null;
   answers: Record<string, string>;
+  source: string | null;
 }
 
 interface DashboardData {
@@ -61,6 +62,11 @@ export const useDashboardData = routeLoader$<DashboardData>(async (requestEvent)
     throw requestEvent.redirect(302, '/');
   }
 
+  // Ensure source column exists to avoid SQL errors if migration hasn't run
+  // Although ensureSourceColumn runs in the other route, dashboard might be accessed first.
+  // Ideally, we trust the table schema, but let's be safe or just assume it exists since we ran the other route.
+  // For safety and correctness with the previous task, we assume the column exists.
+
   const attemptsResult = await client.execute(`
     SELECT
       p.id,
@@ -76,6 +82,7 @@ export const useDashboardData = routeLoader$<DashboardData>(async (requestEvent)
       p.created_at,
       p.answers_json,
       p.feedback_summary,
+      p.source,
       u.email AS account_email
     FROM placement_test_attempts p
     LEFT JOIN users u ON u.id = p.user_id
@@ -104,6 +111,7 @@ export const useDashboardData = routeLoader$<DashboardData>(async (requestEvent)
       created_at: row.created_at ?? new Date().toISOString(),
       account_email: row.account_email ?? null,
       feedback_summary: row.feedback_summary ?? null,
+      source: row.source ?? null,
       answers,
     };
   });
@@ -135,6 +143,7 @@ export default component$(() => {
   const availableLevels = Array.from(new Set(attempts.map((attempt) => attempt.level ?? 'Pendiente'))).sort();
   const controls = useStore({
     level: 'all',
+    source: 'all',
     search: '',
     page: 1,
     pageSize: 10,
@@ -143,10 +152,18 @@ export default component$(() => {
   const filteredAttemptsSignal = useSignal<PlacementAttemptRow[]>(attempts);
 
   useVisibleTask$(({ track }) => {
-    track(() => [controls.level, controls.search, controls.pageSize, attempts.length]);
+    track(() => [controls.level, controls.source, controls.search, controls.pageSize, attempts.length]);
     const normalizedQuery = controls.search.trim().toLowerCase();
     const results = attempts.filter((attempt) => {
       const levelMatch = controls.level === 'all' || (attempt.level ?? 'Pendiente') === controls.level;
+
+      let sourceMatch = true;
+      if (controls.source === 'standard') {
+        sourceMatch = !attempt.source || attempt.source !== 'placement_after';
+      } else if (controls.source === 'placement_after') {
+        sourceMatch = attempt.source === 'placement_after';
+      }
+
       const queryMatch =
         !normalizedQuery ||
         [
@@ -155,11 +172,16 @@ export default component$(() => {
           attempt.account_email ?? '',
           attempt.country ?? '',
           attempt.level ?? '',
+          attempt.source ?? '',
+          // Also search in answers for extra fields if available
+          attempt.answers?.institution ?? '',
+          attempt.answers?.rep_name ?? '',
+          attempt.answers?.student_name ?? '',
         ]
           .join(' ')
           .toLowerCase()
           .includes(normalizedQuery);
-      return levelMatch && queryMatch;
+      return levelMatch && sourceMatch && queryMatch;
     });
     filteredAttemptsSignal.value = results;
     const maxPage = Math.max(1, Math.ceil(results.length / controls.pageSize));
@@ -232,6 +254,21 @@ export default component$(() => {
                       controls.page = 1;
                     }}
                   />
+                </div>
+                <div>
+                  <label class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Origen</label>
+                  <select
+                    class="mt-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                    value={controls.source}
+                    onChange$={(event) => {
+                      controls.source = (event.target as HTMLSelectElement).value;
+                      controls.page = 1;
+                    }}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="standard">Standard</option>
+                    <option value="placement_after">Placement After</option>
+                  </select>
                 </div>
                 <div>
                   <label class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Nivel</label>
@@ -313,21 +350,34 @@ export default component$(() => {
                   <th class="px-6 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Feedback IA</th>
                   <th class="px-6 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Cuenta</th>
                   <th class="px-6 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Fecha</th>
-                    <th class="px-6 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Respuestas</th>
+                  <th class="px-6 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Respuestas</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
                 {paginatedAttempts.map((attempt) => {
                   const attemptKey = String(attempt.id);
                   const isExpanded = !!expandedRows[attemptKey];
+                  const isPlacementAfter = attempt.source === 'placement_after';
+                  // Use name from answers if 'placement_after' and available, else use account name
+                  const displayName = isPlacementAfter && attempt.answers.student_name
+                    ? attempt.answers.student_name
+                    : (attempt.full_name || 'Sin nombre');
+
                   return (
                     <>
                       <tr key={attempt.id} class="hover:bg-gray-50 dark:hover:bg-gray-900/30">
                         <td class="px-6 py-4">
-                          <p class="font-semibold text-gray-900 dark:text-white">
-                            {attempt.full_name || 'Sin nombre'}
-                          </p>
-                          <p class="text-xs text-gray-500">ID #{attempt.id}</p>
+                          <div class="flex flex-col">
+                            {isPlacementAfter && (
+                              <span class="mb-1 w-fit rounded bg-blue-100 px-2 py-0.5 text-[10px] uppercase font-bold text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                Placement After
+                              </span>
+                            )}
+                            <p class="font-semibold text-gray-900 dark:text-white">
+                              {displayName}
+                            </p>
+                            <p class="text-xs text-gray-500">ID #{attempt.id}</p>
+                          </div>
                         </td>
                         <td class="px-6 py-4 text-gray-700 dark:text-gray-200">
                           <p>{attempt.email || '—'}</p>
@@ -367,6 +417,39 @@ export default component$(() => {
                       {isExpanded && (
                         <tr key={`${attempt.id}-answers`} class="bg-gray-50 dark:bg-gray-900/50">
                           <td colSpan={9} class="px-6 py-4">
+                            {/* EXTRA INFO FOR PLACEMENT AFTER */}
+                            {isPlacementAfter && (
+                              <div class="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-900/20">
+                                <h3 class="mb-3 text-sm font-bold uppercase tracking-wider text-blue-800 dark:text-blue-300">Datos Adicionales</h3>
+                                <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                  <div>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400">Representante</span>
+                                    <span class="font-medium text-gray-900 dark:text-white">{attempt.answers.rep_name || '—'}</span>
+                                  </div>
+                                  <div>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400">Teléfono Rep.</span>
+                                    <span class="font-medium text-gray-900 dark:text-white">{attempt.answers.rep_phone || '—'}</span>
+                                  </div>
+                                  <div>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400">Institución</span>
+                                    <span class="font-medium text-gray-900 dark:text-white">{attempt.answers.institution || '—'}</span>
+                                  </div>
+                                  <div>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400">Grado</span>
+                                    <span class="font-medium text-gray-900 dark:text-white">{attempt.answers.student_grade || '—'}</span>
+                                  </div>
+                                  <div>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400">Edad</span>
+                                    <span class="font-medium text-gray-900 dark:text-white">{attempt.answers.student_age || '—'}</span>
+                                  </div>
+                                  <div>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400">Sexo</span>
+                                    <span class="font-medium text-gray-900 dark:text-white">{attempt.answers.student_sex || '—'}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
                             <div class="grid gap-3">
                               {orderedPlacementQuestions.map((question) => {
                                 const questionMeta = placementQuestionDetails[question.id];

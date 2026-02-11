@@ -10,10 +10,10 @@ import path from 'path';
 export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<{ success: boolean, message: string }> {
   console.log('[DB-INIT] Starting database initialization');
   const client = tursoClient(requestEvent);
-  
+
   try {    // Use a hardcoded schema to avoid file system issues
     console.log('[DB-INIT] Using hardcoded auth schema');
-    
+
     // Define the auth schema directly in the code
     const schemaSql = `
       -- Users Table for Authentication
@@ -92,26 +92,26 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
 
       CREATE INDEX IF NOT EXISTS idx_placement_attempts_user ON placement_test_attempts(user_id);
     `;
-    
+
     // Split the SQL into separate statements and execute them
     const statements = schemaSql
       .split(';')
       .map(stmt => stmt.trim())
       .filter(stmt => stmt.length > 0);
-    
+
     console.log(`[DB-INIT] Executing ${statements.length} SQL statements`);
-    
+
     for (const stmt of statements) {
       await client.execute(stmt);
     }
-    
+
     // Verify the tables were created
     // Verify both tables were created
     const tablesResult = await client.batch([
       "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
       "SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history'"
     ], 'read');
-    
+
     // Check if both results have rows indicating the tables exist
     if (tablesResult[0].rows.length === 0 || tablesResult[1].rows.length === 0) {
       console.error('[DB-INIT] Verification failed: users or chat_history table not found.');
@@ -120,7 +120,7 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
         message: 'Required tables (users, chat_history) were not created successfully'
       };
     }
-    
+
     console.log('[DB-INIT] Database initialized successfully');
     return {
       success: true,
@@ -142,11 +142,11 @@ export async function initAuthDatabase(requestEvent: RequestEventBase): Promise<
 export async function checkDatabaseConnection(requestEvent: RequestEventBase): Promise<{ connected: boolean, message: string }> {
   console.log('[DB-CHECK] Checking database connection');
   const client = tursoClient(requestEvent);
-  
+
   try {
     // Simple query to test the connection
     const result = await client.execute('SELECT 1 as test');
-    
+
     if (result.rows && result.rows.length > 0) {
       console.log('[DB-CHECK] Database connection successful');
       return {
@@ -176,31 +176,31 @@ export async function checkDatabaseConnection(requestEvent: RequestEventBase): P
 export async function createTestUser(requestEvent: RequestEventBase): Promise<{ success: boolean, message: string }> {
   console.log('[DB-TEST] Creating test user for development');
   const client = tursoClient(requestEvent);
-  
+
   try {
     // Check if test user already exists
     const checkResult = await client.execute({
       sql: 'SELECT id FROM users WHERE email = ?',
       args: ['test@example.com']
     });
-    
+
     if (checkResult.rows.length > 0) {
       console.log('[DB-TEST] Test user already exists');
       return { success: true, message: 'Test user already exists' };
     }
-    
+
     // Import hashPassword function
     const { hashPassword } = await import('./auth');
-    
+
     // Hash a simple password
     const passwordHash = await hashPassword('password123');
-    
+
     // Create the test user
     await client.execute({
       sql: 'INSERT INTO users (email, password_hash, type, name) VALUES (?, ?, ?, ?)',
       args: ['test@example.com', passwordHash, 'admin', 'Test User']
     });
-    
+
     console.log('[DB-TEST] Test user created successfully');
     return { success: true, message: 'Test user created successfully' };
   } catch (error) {
